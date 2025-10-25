@@ -1,0 +1,37 @@
+# MunLink Zambales - Environment Variables Template
+# Copy this file to .env and fill in your actual values
+
+# DATABASE CONFIGURATION
+DATABASE_URL=postgresql://munlink_user:your_password@localhost:5432/munlink_zambales
+
+# JWT CONFIGURATION
+JWT_SECRET_KEY=f7d35600f9d2a1bb4bd2c5b721547c96c3bf15de1add8967dacf4590fb2ad88a15dc8346275e3ba98ea642a939a4e79f8acdd40209237127bf3b3b9360dbe85a
+JWT_ACCESS_TOKEN_EXPIRES=86400
+
+# ADMIN SECURITY
+ADMIN_SECRET_KEY=Pauljohn8265
+
+# EMAIL CONFIGURATION
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=munlink.egov@gmail.com
+SMTP_PASSWORD=jdrj qris dvco fbmx
+FROM_EMAIL=munlink.egov@gmail.com
+
+# FRONTEND URLS
+WEB_URL=http://localhost:3000
+ADMIN_URL=http://localhost:3001
+
+# APPLICATION
+APP_NAME=MunLink Zambales
+FLASK_ENV=development
+DEBUG=True
+
+# FILE UPLOADS
+MAX_FILE_SIZE=10485760
+UPLOAD_FOLDER=uploads/zambales
+
+# QR CODES
+QR_BASE_URL=http://localhost:3000/verify
+QR_EXPIRY_DAYS=30
+

@@ -1,0 +1,240 @@
+"""Marketplace models for items, transactions, and messages."""
+from datetime import datetime
+try:
+    from apps.api import db
+except ImportError:
+    from __init__ import db
+from sqlalchemy import Index
+
+class Item(db.Model):
+    __tablename__ = 'items'
+    
+    # Primary Key
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Owner Information
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    # Item Details
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50), nullable=False)  # electronics, furniture, clothing, etc.
+    condition = db.Column(db.String(20), nullable=False)  # new, like_new, good, fair, poor
+    
+    # Transaction Type
+    transaction_type = db.Column(db.String(20), nullable=False)  # donate, lend, sell
+    
+    # Price (for sell items)
+    price = db.Column(db.Numeric(10, 2), nullable=True)
+    
+    # Lending Details (for lend items)
+    lend_duration_days = db.Column(db.Integer, nullable=True)
+    security_deposit = db.Column(db.Numeric(10, 2), nullable=True)
+    
+    # Location
+    municipality_id = db.Column(db.Integer, db.ForeignKey('municipalities.id'), nullable=False)
+    barangay_id = db.Column(db.Integer, db.ForeignKey('barangays.id'), nullable=True)
+    pickup_location = db.Column(db.String(200), nullable=True)
+    
+    # Images (stored as JSON array of paths)
+    images = db.Column(db.JSON, nullable=True)
+    
+    # Status
+    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected, available, reserved, completed, cancelled
+    is_active = db.Column(db.Boolean, default=True)
+    
+    # Admin moderation fields
+    approved_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)
+    rejected_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    rejected_at = db.Column(db.DateTime, nullable=True)
+    rejection_reason = db.Column(db.Text, nullable=True)
+    
+    # View Count
+    view_count = db.Column(db.Integer, default=0)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id], backref='items')
+    municipality = db.relationship('Municipality', backref='items')
+    barangay = db.relationship('Barangay', backref='items')
+    transactions = db.relationship('Transaction', backref='item', lazy='dynamic')
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_item_municipality', 'municipality_id'),
+        Index('idx_item_category', 'category'),
+        Index('idx_item_transaction_type', 'transaction_type'),
+        Index('idx_item_status', 'status'),
+        Index('idx_item_created_at', 'created_at'),
+    )
+    
+    def __repr__(self):
+        return f'<Item {self.title}>'
+    
+    def to_dict(self, include_user=False):
+        """Convert item to dictionary."""
+        data = {
+            'id': self.id,
+            'user_id': self.user_id,
+            'title': self.title,
+            'description': self.description,
+            'category': self.category,
+            'condition': self.condition,
+            'transaction_type': self.transaction_type,
+            'price': float(self.price) if self.price else None,
+            'lend_duration_days': self.lend_duration_days,
+            'security_deposit': float(self.security_deposit) if self.security_deposit else None,
+            'municipality_id': self.municipality_id,
+            'barangay_id': self.barangay_id,
+            'pickup_location': self.pickup_location,
+            'images': self.images,
+            'status': self.status,
+            'is_active': self.is_active,
+            'approved_by': self.approved_by,
+            'approved_at': self.approved_at.isoformat() if self.approved_at else None,
+            'rejected_by': self.rejected_by,
+            'rejected_at': self.rejected_at.isoformat() if self.rejected_at else None,
+            'rejection_reason': self.rejection_reason,
+            'view_count': self.view_count,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+        
+        if include_user and self.user:
+            data['user'] = self.user.to_dict()
+            data['seller'] = {
+                'id': self.user.id,
+                'first_name': self.user.first_name,
+                'last_name': self.user.last_name,
+                'username': self.user.username,
+                'email': self.user.email
+            }
+        
+        return data
+
+
+class Transaction(db.Model):
+    __tablename__ = 'transactions'
+    
+    # Primary Key
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Related Item and Users
+    item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=False)
+    buyer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # or borrower/receiver
+    seller_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # or lender/donor
+    
+    # Transaction Details
+    transaction_type = db.Column(db.String(20), nullable=False)  # donate, lend, sell
+    status = db.Column(db.String(20), default='pending')  # pending, accepted, completed, cancelled, returned
+    
+    # Financial Details (for sell/lend)
+    amount = db.Column(db.Numeric(10, 2), nullable=True)
+    
+    # Lending Specific
+    borrow_start_date = db.Column(db.DateTime, nullable=True)
+    borrow_end_date = db.Column(db.DateTime, nullable=True)
+    return_date = db.Column(db.DateTime, nullable=True)
+    
+    # Notes
+    buyer_notes = db.Column(db.Text, nullable=True)
+    seller_notes = db.Column(db.Text, nullable=True)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    
+    # Relationships
+    buyer = db.relationship('User', foreign_keys=[buyer_id], backref='purchases')
+    seller = db.relationship('User', foreign_keys=[seller_id], backref='sales')
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_transaction_buyer', 'buyer_id'),
+        Index('idx_transaction_seller', 'seller_id'),
+        Index('idx_transaction_status', 'status'),
+    )
+    
+    def __repr__(self):
+        return f'<Transaction {self.id} - {self.transaction_type}>'
+    
+    def to_dict(self):
+        """Convert transaction to dictionary."""
+        return {
+            'id': self.id,
+            'item_id': self.item_id,
+            'buyer_id': self.buyer_id,
+            'seller_id': self.seller_id,
+            'transaction_type': self.transaction_type,
+            'status': self.status,
+            'amount': float(self.amount) if self.amount else None,
+            'borrow_start_date': self.borrow_start_date.isoformat() if self.borrow_start_date else None,
+            'borrow_end_date': self.borrow_end_date.isoformat() if self.borrow_end_date else None,
+            'return_date': self.return_date.isoformat() if self.return_date else None,
+            'buyer_notes': self.buyer_notes,
+            'seller_notes': self.seller_notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+class Message(db.Model):
+    __tablename__ = 'messages'
+    
+    # Primary Key
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Sender and Receiver
+    sender_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    # Related Item (optional - for marketplace conversations)
+    item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=True)
+    
+    # Message Content
+    content = db.Column(db.Text, nullable=False)
+    
+    # Status
+    is_read = db.Column(db.Boolean, default=False)
+    is_deleted_by_sender = db.Column(db.Boolean, default=False)
+    is_deleted_by_receiver = db.Column(db.Boolean, default=False)
+    
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    read_at = db.Column(db.DateTime, nullable=True)
+    
+    # Relationships
+    sender = db.relationship('User', foreign_keys=[sender_id], backref='sent_messages')
+    receiver = db.relationship('User', foreign_keys=[receiver_id], backref='received_messages')
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_message_sender', 'sender_id'),
+        Index('idx_message_receiver', 'receiver_id'),
+        Index('idx_message_item', 'item_id'),
+        Index('idx_message_created_at', 'created_at'),
+    )
+    
+    def __repr__(self):
+        return f'<Message {self.id} from {self.sender_id} to {self.receiver_id}>'
+    
+    def to_dict(self):
+        """Convert message to dictionary."""
+        return {
+            'id': self.id,
+            'sender_id': self.sender_id,
+            'receiver_id': self.receiver_id,
+            'item_id': self.item_id,
+            'content': self.content,
+            'is_read': self.is_read,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'read_at': self.read_at.isoformat() if self.read_at else None,
+        }
+

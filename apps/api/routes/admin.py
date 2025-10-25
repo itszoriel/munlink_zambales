@@ -1,0 +1,1700 @@
+"""
+MunLink Zambales - Admin Routes
+Admin-specific operations with municipality scoping
+"""
+from flask import Blueprint, request, jsonify, current_app
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt, verify_jwt_in_request
+from sqlalchemy import func, and_, or_
+from datetime import datetime, timedelta
+from apps.api import db
+from apps.api.models.user import User
+from apps.api.models.municipality import Municipality
+from apps.api.models.issue import Issue, IssueCategory
+from apps.api.models.marketplace import Item as MarketplaceItem
+from apps.api.models.benefit import BenefitProgram
+from apps.api.models.benefit import BenefitApplication
+from apps.api.models.document import DocumentRequest, DocumentType
+from apps.api.models.announcement import Announcement
+from apps.api.models.transfer import TransferRequest
+from apps.api.utils.file_handler import save_announcement_image
+from apps.api.utils.validators import ValidationError
+from apps.api.utils.email_sender import send_user_status_email, send_document_request_status_email
+
+admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
+
+@admin_bp.before_request
+def enforce_admin_role():
+    """Middleware: require JWT and admin role for all /api/admin routes."""
+    try:
+        verify_jwt_in_request()
+        claims = get_jwt() or {}
+        role = claims.get('role')
+        if role not in ('admin', 'municipal_admin'):
+            return jsonify({'error': 'Forbidden', 'code': 'ROLE_MISMATCH'}), 403
+    except Exception:
+        # If token missing/invalid, let route-level @jwt_required handle auth errors
+        pass
+
+def get_admin_municipality_id():
+    """Get the municipality ID for the current admin user."""
+    # get_jwt_identity returns whatever was used as identity when creating
+    # the token. We cast to int for DB lookup.
+    identity = get_jwt_identity()
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        print(f"DEBUG: Invalid JWT identity: {identity}")
+        return None
+    print(f"DEBUG: JWT identity: {user_id}")  # Debug line
+    user = User.query.get(user_id)
+    print(f"DEBUG: User found: {user.username if user else 'None'}, Role: {user.role if user else 'None'}")  # Debug line
+    
+    if not user or user.role not in ['admin', 'municipal_admin']:
+        print(f"DEBUG: User validation failed - user: {user}, role: {user.role if user else 'None'}")  # Debug line
+        return None
+    
+    print(f"DEBUG: Admin municipality ID: {user.admin_municipality_id}")  # Debug line
+    return user.admin_municipality_id
+
+def require_admin_municipality():
+    """Decorator to ensure admin has municipality scope."""
+    municipality_id = get_admin_municipality_id()
+    if not municipality_id:
+        return jsonify({'error': 'Admin access required'}), 403
+    return municipality_id
+
+# User Verification Endpoints
+@admin_bp.route('/users/<int:user_id>', methods=['GET'])
+@jwt_required()
+def get_user_detail(user_id):
+    """Get a single user's details for admin review, including verification files."""
+    try:
+        municipality_id = get_admin_municipality_id()
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        # If admin has municipality scope, enforce it
+        if municipality_id and user.municipality_id != municipality_id and user.role != 'municipal_admin':
+            return jsonify({'error': 'User not in your municipality'}), 403
+        return jsonify(user.to_dict(include_sensitive=True, include_municipality=True)), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get user detail', 'details': str(e)}), 500
+@admin_bp.route('/users/pending', methods=['GET'])
+@jwt_required()
+def get_pending_users():
+    """Get unverified users for admin's municipality."""
+    try:
+        municipality_id = get_admin_municipality_id()
+        # If admin has no municipality scope, treat as province-level admin and show all
+        base_filters = [
+            User.role == 'resident',
+            User.admin_verified == False,
+            User.is_active == True,
+        ]
+        filters = base_filters.copy()
+        if municipality_id:
+            filters.append(User.municipality_id == municipality_id)
+
+        pending_users = (
+            User.query
+            .filter(and_(*filters))
+            .order_by(User.created_at.desc())
+            .all()
+        )
+
+        # Fallback: if scoped query returns none but dashboard shows pending,
+        # try without municipality scope to avoid mismatches in early setups.
+        if not pending_users and municipality_id:
+            pending_users = (
+                User.query
+                .filter(and_(*base_filters))
+                .order_by(User.created_at.desc())
+                .all()
+            )
+
+        users_data = [u.to_dict(include_sensitive=True, include_municipality=True) for u in pending_users]
+        return jsonify({'users': users_data, 'count': len(users_data)}), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get pending users', 'details': str(e)}), 500
+
+@admin_bp.route('/users/<int:user_id>/verify', methods=['POST'])
+@jwt_required()
+def verify_user(user_id):
+    """Approve user verification."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        if user.municipality_id != municipality_id:
+            return jsonify({'error': 'User not in your municipality'}), 403
+        
+        if user.role != 'resident':
+            return jsonify({'error': 'User is not a resident'}), 400
+        
+        # Approve the user
+        user.admin_verified = True
+        user.admin_verified_at = datetime.utcnow()
+        user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+
+        # Send approval email (best-effort)
+        try:
+            if user.email:
+                send_user_status_email(user.email, approved=True)
+        except Exception:
+            pass
+        
+        return jsonify({
+            'message': 'User verified successfully',
+            'user': user.to_dict(include_sensitive=True)
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to verify user', 'details': str(e)}), 500
+
+@admin_bp.route('/users/<int:user_id>/reject', methods=['POST'])
+@jwt_required()
+def reject_user(user_id):
+    """Reject user verification."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        data = request.get_json(silent=True) or {}
+        reason = data.get('reason', 'Verification rejected')
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        if user.municipality_id != municipality_id:
+            return jsonify({'error': 'User not in your municipality'}), 403
+        
+        if user.role != 'resident':
+            return jsonify({'error': 'User is not a resident'}), 400
+        
+        # Reject the user (deactivate)
+        user.is_active = False
+        user.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+
+        # Send rejection email (best-effort)
+        try:
+            if user.email:
+                send_user_status_email(user.email, approved=False, reason=reason)
+        except Exception:
+            pass
+        
+        return jsonify({
+            'message': 'User rejected successfully',
+            'reason': reason
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to reject user', 'details': str(e)}), 500
+
+@admin_bp.route('/users/<int:user_id>/suspend', methods=['POST'])
+@jwt_required()
+def suspend_user(user_id: int):
+    """Toggle suspend/unsuspend a resident in the admin's municipality."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        if user.role != 'resident':
+            return jsonify({'error': 'User is not a resident'}), 400
+        if user.municipality_id != municipality_id:
+            return jsonify({'error': 'User not in your municipality'}), 403
+
+        user.is_active = not bool(user.is_active)
+        user.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({'message': 'User status updated', 'user': user.to_dict(include_sensitive=True)}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update user status', 'details': str(e)}), 500
+
+@admin_bp.route('/users/verified', methods=['GET'])
+@jwt_required()
+def get_verified_users():
+    """Get verified users list."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        verified_users = User.query.filter(
+            and_(
+                User.municipality_id == municipality_id,
+                User.role == 'resident',
+                User.admin_verified == True,
+                User.is_active == True
+            )
+        ).order_by(User.created_at.desc()).paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        users_data = []
+        for user in verified_users.items:
+            # Include municipality info so the admin UI can client-side scope by municipality
+            user_data = user.to_dict(include_sensitive=True, include_municipality=True)
+            users_data.append(user_data)
+        
+        return jsonify({
+            'users': users_data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': verified_users.total,
+                'pages': verified_users.pages
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get verified users', 'details': str(e)}), 500
+
+@admin_bp.route('/users/stats', methods=['GET'])
+@jwt_required()
+def get_user_stats():
+    """Get user statistics for dashboard."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        # Count users by status
+        total_users = User.query.filter(
+            and_(
+                User.municipality_id == municipality_id,
+                User.role == 'resident'
+            )
+        ).count()
+        
+        pending_users = User.query.filter(
+            and_(
+                User.municipality_id == municipality_id,
+                User.role == 'resident',
+                User.admin_verified == False,
+                User.is_active == True
+            )
+        ).count()
+        
+        verified_users = User.query.filter(
+            and_(
+                User.municipality_id == municipality_id,
+                User.role == 'resident',
+                User.admin_verified == True,
+                User.is_active == True
+            )
+        ).count()
+        
+        # Recent registrations (last 7 days)
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        recent_registrations = User.query.filter(
+            and_(
+                User.municipality_id == municipality_id,
+                User.role == 'resident',
+                User.created_at >= week_ago
+            )
+        ).count()
+        
+        return jsonify({
+            'total_users': total_users,
+            'pending_verifications': pending_users,
+            'verified_users': verified_users,
+            'recent_registrations': recent_registrations
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get user statistics', 'details': str(e)}), 500
+
+@admin_bp.route('/users/growth', methods=['GET'])
+@jwt_required()
+def get_user_growth():
+    """Return user registrations per day for a given range (last_7_days, last_30_days, last_90_days, this_year)."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        range_param = request.args.get('range', 'last_30_days')
+        start, end = _parse_range(range_param)
+
+        # SQLite-friendly daily buckets
+        rows = (
+            db.session.query(
+                func.strftime('%Y-%m-%d', User.created_at).label('day'),
+                func.count(User.id)
+            )
+            .filter(and_(
+                User.municipality_id == municipality_id,
+                User.role == 'resident',
+                User.created_at >= start,
+                User.created_at <= end,
+            ))
+            .group_by('day')
+            .order_by('day')
+            .all()
+        )
+        counts = {d: int(c) for d, c in rows}
+        # Build full series inclusive of dates in range
+        days = []
+        cur = start
+        while cur.date() <= end.date():
+            day = cur.strftime('%Y-%m-%d')
+            days.append({'day': day, 'count': counts.get(day, 0)})
+            cur += timedelta(days=1)
+
+        return jsonify({'series': days, 'range': range_param}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get user growth', 'details': str(e)}), 500
+
+# Issue Management Endpoints
+@admin_bp.route('/issues', methods=['GET'])
+@jwt_required()
+def get_issues():
+    """Get all issues for municipality with filters."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        try:
+            # Get filter parameters
+            status = request.args.get('status')
+            category = request.args.get('category')
+            page = request.args.get('page', 1, type=int)
+            per_page = request.args.get('per_page', 20, type=int)
+            
+            # Build query
+            query = Issue.query.filter(Issue.municipality_id == municipality_id)
+            
+            if status:
+                # Map UI aliases to model statuses
+                normalized = status
+                if status == 'pending':
+                    normalized = 'submitted'
+                query = query.filter(Issue.status == normalized)
+            
+            if category:
+                # Accept id or slug/name
+                try:
+                    cat_id = int(category)
+                    query = query.filter(Issue.category_id == cat_id)
+                except (TypeError, ValueError):
+                    cat = IssueCategory.query.filter(
+                        or_(IssueCategory.slug == category, IssueCategory.name == category)
+                    ).first()
+                    if cat:
+                        query = query.filter(Issue.category_id == cat.id)
+            
+            issues = query.order_by(Issue.created_at.desc()).paginate(
+                page=page, per_page=per_page, error_out=False
+            )
+            
+            issues_data = []
+            for issue in issues.items:
+                issue_data = issue.to_dict(include_user=True)
+                try:
+                    issue_data['municipality_name'] = issue.municipality.name if issue.municipality else None
+                except Exception:
+                    issue_data['municipality_name'] = None
+                issues_data.append(issue_data)
+            
+            return jsonify({
+                'issues': issues_data,
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': issues.total,
+                    'pages': issues.pages
+                }
+            }), 200
+        except Exception as model_error:
+            # If no issues or model error, return empty list
+            return jsonify({
+                'issues': [],
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': 0,
+                    'pages': 0
+                },
+                'message': 'No issues found'
+            }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get issues', 'details': str(e)}), 500
+
+@admin_bp.route('/issues/<int:issue_id>', methods=['GET'])
+@jwt_required()
+def get_issue(issue_id):
+    """Get issue details."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        issue = Issue.query.get(issue_id)
+        if not issue:
+            return jsonify({'error': 'Issue not found'}), 404
+        
+        if issue.municipality_id != municipality_id:
+            return jsonify({'error': 'Issue not in your municipality'}), 403
+        
+        data = issue.to_dict(include_user=True)
+        try:
+            data['municipality_name'] = issue.municipality.name if issue.municipality else None
+        except Exception:
+            data['municipality_name'] = None
+        return jsonify(data), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get issue', 'details': str(e)}), 500
+
+@admin_bp.route('/issues/<int:issue_id>/status', methods=['PUT'])
+@jwt_required()
+def update_issue_status(issue_id):
+    """Update issue status."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        data = request.get_json()
+        new_status = (data.get('status') or '').lower()
+        # Map UI alias
+        if new_status == 'pending':
+            new_status = 'submitted'
+        
+        if new_status not in ['submitted', 'under_review', 'in_progress', 'resolved', 'closed', 'rejected']:
+            return jsonify({'error': 'Invalid status'}), 400
+        
+        issue = Issue.query.get(issue_id)
+        if not issue:
+            return jsonify({'error': 'Issue not found'}), 404
+        
+        if issue.municipality_id != municipality_id:
+            return jsonify({'error': 'Issue not in your municipality'}), 403
+        # Guard transitions
+        current = (issue.status or 'submitted').lower()
+        allowed = {
+            'submitted': {'under_review', 'in_progress', 'rejected'},
+            'under_review': {'in_progress', 'resolved', 'rejected'},
+            'in_progress': {'resolved', 'rejected'},
+            'resolved': {'closed'},
+            'closed': set(),
+            'rejected': set(),
+        }
+        if new_status not in allowed.get(current, set()):
+            return jsonify({'error': f'Invalid transition from {current} to {new_status}'}), 400
+
+        issue.status = new_status
+        issue.status_updated_by = get_jwt_identity()
+        now = datetime.utcnow()
+        issue.status_updated_at = now
+        issue.updated_at = now
+        if new_status == 'under_review' and not issue.reviewed_at:
+            issue.reviewed_at = now
+        if new_status == 'resolved' and not issue.resolved_at:
+            issue.resolved_at = now
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Issue status updated successfully',
+            'issue': issue.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update issue status', 'details': str(e)}), 500
+
+@admin_bp.route('/issues/<int:issue_id>/response', methods=['POST'])
+@jwt_required()
+def add_issue_response(issue_id):
+    """Add admin response to issue."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        data = request.get_json()
+        response_text = data.get('response')
+        
+        if not response_text:
+            return jsonify({'error': 'Response text is required'}), 400
+        
+        issue = Issue.query.get(issue_id)
+        if not issue:
+            return jsonify({'error': 'Issue not found'}), 404
+        
+        if issue.municipality_id != municipality_id:
+            return jsonify({'error': 'Issue not in your municipality'}), 403
+        
+        # Add admin response
+        issue.admin_response = response_text
+        issue.admin_response_by = get_jwt_identity()
+        issue.admin_response_at = datetime.utcnow()
+        issue.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Response added successfully',
+            'issue': issue.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to add response', 'details': str(e)}), 500
+
+@admin_bp.route('/issues/stats', methods=['GET'])
+@jwt_required()
+def get_issue_stats():
+    """Get issue statistics."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        # Count issues by status
+        total_issues = Issue.query.filter(Issue.municipality_id == municipality_id).count()
+        
+        pending_issues = Issue.query.filter(
+            and_(
+                Issue.municipality_id == municipality_id,
+                Issue.status == 'pending'
+            )
+        ).count()
+        
+        active_issues = Issue.query.filter(
+            and_(
+                Issue.municipality_id == municipality_id,
+                Issue.status == 'in_progress'
+            )
+        ).count()
+        
+        resolved_issues = Issue.query.filter(
+            and_(
+                Issue.municipality_id == municipality_id,
+                Issue.status == 'resolved'
+            )
+        ).count()
+        
+        return jsonify({
+            'total_issues': total_issues,
+            'pending_issues': pending_issues,
+            'active_issues': active_issues,
+            'resolved_issues': resolved_issues
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get issue statistics', 'details': str(e)}), 500
+
+# Marketplace Moderation Endpoints
+@admin_bp.route('/marketplace/pending', methods=['GET'])
+@jwt_required()
+def get_pending_marketplace_items():
+    """Get pending marketplace items for moderation."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        try:
+            # Get pending marketplace items for this municipality
+            pending_items = MarketplaceItem.query.filter(
+                and_(
+                    MarketplaceItem.municipality_id == municipality_id,
+                    MarketplaceItem.status == 'pending'
+                )
+            ).order_by(MarketplaceItem.created_at.desc()).all()
+            
+            items_data = []
+            for item in pending_items:
+                item_data = item.to_dict()
+                items_data.append(item_data)
+            
+            return jsonify({
+                'items': items_data,
+                'count': len(items_data)
+            }), 200
+        except Exception as model_error:
+            # If no items or model error, return empty list
+            return jsonify({
+                'items': [],
+                'count': 0,
+                'message': 'No pending marketplace items found'
+            }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get pending marketplace items', 'details': str(e)}), 500
+
+@admin_bp.route('/marketplace/<int:item_id>/approve', methods=['POST'])
+@jwt_required()
+def approve_marketplace_item(item_id):
+    """Approve marketplace item."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        item = MarketplaceItem.query.get(item_id)
+        if not item:
+            return jsonify({'error': 'Marketplace item not found'}), 404
+        
+        if item.municipality_id != municipality_id:
+            return jsonify({'error': 'Item not in your municipality'}), 403
+        
+        # Approve the item
+        item.status = 'approved'
+        item.approved_by = get_jwt_identity()
+        item.approved_at = datetime.utcnow()
+        item.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Marketplace item approved successfully',
+            'item': item.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to approve marketplace item', 'details': str(e)}), 500
+
+@admin_bp.route('/marketplace/<int:item_id>/reject', methods=['POST'])
+@jwt_required()
+def reject_marketplace_item(item_id):
+    """Reject marketplace item."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        data = request.get_json()
+        reason = data.get('reason', 'Item rejected by admin')
+        
+        item = MarketplaceItem.query.get(item_id)
+        if not item:
+            return jsonify({'error': 'Marketplace item not found'}), 404
+        
+        if item.municipality_id != municipality_id:
+            return jsonify({'error': 'Item not in your municipality'}), 403
+        
+        # Reject the item
+        item.status = 'rejected'
+        item.rejection_reason = reason
+        item.rejected_by = get_jwt_identity()
+        item.rejected_at = datetime.utcnow()
+        item.updated_at = datetime.utcnow()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Marketplace item rejected successfully',
+            'reason': reason
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to reject marketplace item', 'details': str(e)}), 500
+
+@admin_bp.route('/marketplace/stats', methods=['GET'])
+@jwt_required()
+def get_marketplace_stats():
+    """Get marketplace statistics."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        # Count marketplace items by status
+        total_items = MarketplaceItem.query.filter(
+            MarketplaceItem.municipality_id == municipality_id
+        ).count()
+        
+        pending_items = MarketplaceItem.query.filter(
+            and_(
+                MarketplaceItem.municipality_id == municipality_id,
+                MarketplaceItem.status == 'pending'
+            )
+        ).count()
+        
+        approved_items = MarketplaceItem.query.filter(
+            and_(
+                MarketplaceItem.municipality_id == municipality_id,
+                MarketplaceItem.status == 'approved'
+            )
+        ).count()
+        
+        rejected_items = MarketplaceItem.query.filter(
+            and_(
+                MarketplaceItem.municipality_id == municipality_id,
+                MarketplaceItem.status == 'rejected'
+            )
+        ).count()
+        
+        return jsonify({
+            'total_items': total_items,
+            'pending_items': pending_items,
+            'approved_items': approved_items,
+            'rejected_items': rejected_items
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get marketplace statistics', 'details': str(e)}), 500
+
+# Announcements Management Endpoints
+@admin_bp.route('/announcements', methods=['GET'])
+@jwt_required()
+def get_announcements():
+    """Get all announcements for municipality."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        # Check if Announcement model exists
+        try:
+            announcements = Announcement.query.filter(
+                Announcement.municipality_id == municipality_id
+            ).order_by(Announcement.created_at.desc()).all()
+            
+            announcements_data = []
+            for announcement in announcements:
+                announcement_data = announcement.to_dict()
+                announcements_data.append(announcement_data)
+            
+            return jsonify({
+                'announcements': announcements_data,
+                'count': len(announcements_data)
+            }), 200
+        except Exception as model_error:
+            # If model doesn't exist or table doesn't exist, return empty list
+            return jsonify({
+                'announcements': [],
+                'count': 0,
+                'message': 'No announcements available yet'
+            }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get announcements', 'details': str(e)}), 500
+
+@admin_bp.route('/announcements', methods=['POST'])
+@jwt_required()
+def create_announcement():
+    """Create new announcement."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        data = request.get_json()
+        title = data.get('title')
+        content = data.get('content')
+        priority = data.get('priority', 'medium')
+        
+        if not title or not content:
+            return jsonify({'error': 'Title and content are required'}), 400
+        
+        if priority not in ['high', 'medium', 'low']:
+            return jsonify({'error': 'Invalid priority level'}), 400
+        
+        # Create announcement
+        announcement = Announcement(
+            title=title,
+            content=content,
+            municipality_id=municipality_id,
+            created_by=get_jwt_identity(),
+            priority=priority,
+            is_active=True,
+            images=[]
+        )
+        
+        db.session.add(announcement)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Announcement created successfully',
+            'announcement': announcement.to_dict()
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to create announcement', 'details': str(e)}), 500
+
+@admin_bp.route('/announcements/<int:announcement_id>', methods=['PUT'])
+@jwt_required()
+def update_announcement(announcement_id):
+    """Update announcement."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        data = request.get_json(silent=True) or {}
+        
+        announcement = Announcement.query.get(announcement_id)
+        if not announcement:
+            return jsonify({'error': 'Announcement not found'}), 404
+        
+        if announcement.municipality_id != municipality_id:
+            return jsonify({'error': 'Announcement not in your municipality'}), 403
+        
+        # Update fields
+        if 'title' in data:
+            announcement.title = data['title']
+        if 'content' in data:
+            announcement.content = data['content']
+        if 'priority' in data:
+            if data['priority'] in ['high', 'medium', 'low']:
+                announcement.priority = data['priority']
+            else:
+                return jsonify({'error': 'Invalid priority level'}), 400
+        if 'is_active' in data:
+            announcement.is_active = data['is_active']
+        if 'images' in data and isinstance(data['images'], list):
+            announcement.images = data['images']
+        
+        announcement.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Announcement updated successfully',
+            'announcement': announcement.to_dict()
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update announcement', 'details': str(e)}), 500
+
+@admin_bp.route('/announcements/<int:announcement_id>/upload', methods=['POST'])
+@jwt_required()
+def upload_announcement_image(announcement_id):
+    """Upload images for an announcement (max 5)."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+
+        announcement = Announcement.query.get(announcement_id)
+        if not announcement:
+            return jsonify({'error': 'Announcement not found'}), 404
+        if announcement.municipality_id != municipality_id:
+            return jsonify({'error': 'Announcement not in your municipality'}), 403
+
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        file = request.files['file']
+
+        # Enforce max 5 images
+        images = announcement.images or []
+        if len(images) >= 5:
+            return jsonify({'error': 'Maximum images reached (5)'}), 400
+
+        # Municipality slug
+        municipality = Municipality.query.get(municipality_id)
+        municipality_slug = municipality.slug if municipality else 'unknown'
+
+        rel_path = save_announcement_image(file, announcement_id, municipality_slug)
+        images.append(rel_path)
+        announcement.images = images
+        db.session.commit()
+
+        return jsonify({'message': 'Image uploaded', 'path': rel_path, 'announcement': announcement.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to upload image', 'details': str(e)}), 500
+
+@admin_bp.route('/announcements/<int:announcement_id>', methods=['DELETE'])
+@jwt_required()
+def delete_announcement(announcement_id):
+    """Delete announcement."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        announcement = Announcement.query.get(announcement_id)
+        if not announcement:
+            return jsonify({'error': 'Announcement not found'}), 404
+        
+        if announcement.municipality_id != municipality_id:
+            return jsonify({'error': 'Announcement not in your municipality'}), 403
+        
+        db.session.delete(announcement)
+        db.session.commit()
+        
+        return jsonify({
+            'message': 'Announcement deleted successfully'
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to delete announcement', 'details': str(e)}), 500
+
+@admin_bp.route('/announcements/stats', methods=['GET'])
+@jwt_required()
+def get_announcement_stats():
+    """Get announcement statistics."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        # Count announcements by status
+        total_announcements = Announcement.query.filter(
+            Announcement.municipality_id == municipality_id
+        ).count()
+        
+        active_announcements = Announcement.query.filter(
+            and_(
+                Announcement.municipality_id == municipality_id,
+                Announcement.is_active == True
+            )
+        ).count()
+        
+        high_priority = Announcement.query.filter(
+            and_(
+                Announcement.municipality_id == municipality_id,
+                Announcement.priority == 'high',
+                Announcement.is_active == True
+            )
+        ).count()
+        
+        return jsonify({
+            'total_announcements': total_announcements,
+            'active_announcements': active_announcements,
+            'high_priority': high_priority
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get announcement statistics', 'details': str(e)}), 500
+
+# Dashboard Statistics Endpoint
+@admin_bp.route('/dashboard/stats', methods=['GET'])
+@jwt_required()
+def get_dashboard_stats():
+    """Get aggregated statistics for dashboard."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+        
+        # Initialize stats with default values
+        stats = {
+            'pending_verifications': 0,
+            'active_issues': 0,
+            'marketplace_items': 0,
+            'announcements': 0
+        }
+        
+        try:
+            # User statistics
+            pending_verifications = User.query.filter(
+                and_(
+                    User.municipality_id == municipality_id,
+                    User.role == 'resident',
+                    User.admin_verified == False,
+                    User.is_active == True
+                )
+            ).count()
+            stats['pending_verifications'] = pending_verifications
+        except Exception:
+            pass  # Keep default 0
+        
+        try:
+            # Issue statistics
+            active_issues = Issue.query.filter(
+                and_(
+                    Issue.municipality_id == municipality_id,
+                    Issue.status.in_(['pending', 'in_progress'])
+                )
+            ).count()
+            stats['active_issues'] = active_issues
+        except Exception:
+            pass  # Keep default 0
+        
+        try:
+            # Marketplace statistics
+            marketplace_items = MarketplaceItem.query.filter(
+                and_(
+                    MarketplaceItem.municipality_id == municipality_id,
+                    MarketplaceItem.status == 'pending'
+                )
+            ).count()
+            stats['marketplace_items'] = marketplace_items
+        except Exception:
+            pass  # Keep default 0
+        
+        try:
+            # Announcements statistics
+            announcements = Announcement.query.filter(
+                and_(
+                    Announcement.municipality_id == municipality_id,
+                    Announcement.is_active == True
+                )
+            ).count()
+            stats['announcements'] = announcements
+        except Exception:
+            pass  # Keep default 0
+        
+        return jsonify(stats), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get dashboard statistics', 'details': str(e)}), 500
+
+# ---------------------------------------------
+# Benefits Management (Admin)
+# ---------------------------------------------
+
+@admin_bp.route('/benefits/programs', methods=['GET'])
+@jwt_required()
+def admin_list_benefit_programs():
+    """List benefit programs for the admin's municipality (include province-wide/None)."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        q = BenefitProgram.query
+        # Show province-wide (NULL) and this municipality
+        programs = (
+            q.filter(
+                (BenefitProgram.municipality_id == municipality_id) |
+                (BenefitProgram.municipality_id.is_(None))
+            )
+            .order_by(BenefitProgram.created_at.desc())
+            .all()
+        )
+
+        return jsonify({
+            'programs': [p.to_dict() for p in programs],
+            'count': len(programs)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get programs', 'details': str(e)}), 500
+
+@admin_bp.route('/benefits/applications', methods=['GET'])
+@jwt_required()
+def admin_list_benefit_applications():
+    """List benefit applications scoped to admin municipality (include province-wide programs)."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        status = request.args.get('status')
+
+        q = BenefitApplication.query.join(BenefitProgram, BenefitApplication.program_id == BenefitProgram.id)
+        q = q.filter((BenefitProgram.municipality_id == municipality_id) | (BenefitProgram.municipality_id.is_(None)))
+        if status:
+            q = q.filter(BenefitApplication.status == status)
+
+        apps = q.order_by(BenefitApplication.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+        data = []
+        for app in apps.items:
+            data.append(app.to_dict(include_user=True))
+
+        return jsonify({
+            'applications': data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': apps.total,
+                'pages': apps.pages,
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get applications', 'details': str(e)}), 500
+
+
+@admin_bp.route('/benefits/programs/<int:program_id>/applications', methods=['GET'])
+@jwt_required()
+def admin_list_program_applicants(program_id: int):
+    """List applicants for a specific program scoped to admin municipality."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        program = BenefitProgram.query.get(program_id)
+        if not program:
+            return jsonify({'error': 'Program not found'}), 404
+        if program.municipality_id and program.municipality_id != municipality_id:
+            return jsonify({'error': 'Program not in your municipality'}), 403
+
+        apps = BenefitApplication.query.filter(BenefitApplication.program_id == program_id).order_by(BenefitApplication.created_at.desc()).all()
+        data = [a.to_dict(include_user=True) for a in apps]
+        return jsonify({'applications': data, 'count': len(data)}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get program applicants', 'details': str(e)}), 500
+
+# ---------------------------------------------
+# Resident Transfer Requests
+# ---------------------------------------------
+
+@admin_bp.route('/transfers', methods=['GET'])
+@jwt_required()
+def admin_list_transfers():
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+        # Show outgoing (from this municipality) and incoming (to this municipality)
+        rows = TransferRequest.query.filter(
+            or_(TransferRequest.from_municipality_id == municipality_id, TransferRequest.to_municipality_id == municipality_id)
+        ).order_by(TransferRequest.created_at.desc()).all()
+        return jsonify({'transfers': [t.to_dict() for t in rows], 'count': len(rows)}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get transfer requests', 'details': str(e)}), 500
+
+@admin_bp.route('/transfers/<int:transfer_id>/status', methods=['PUT'])
+@jwt_required()
+def admin_update_transfer(transfer_id: int):
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+        data = request.get_json() or {}
+        new_status = (data.get('status') or '').lower()  # approved, rejected, accepted
+
+        t = TransferRequest.query.get(transfer_id)
+        if not t:
+            return jsonify({'error': 'Transfer request not found'}), 404
+
+        now = datetime.utcnow()
+        if new_status == 'approved':
+            if t.from_municipality_id != municipality_id:
+                return jsonify({'error': 'Only current municipality can approve'}), 403
+            t.status = 'approved'
+            t.approved_at = now
+        elif new_status == 'rejected':
+            if t.from_municipality_id != municipality_id:
+                return jsonify({'error': 'Only current municipality can reject'}), 403
+            t.status = 'rejected'
+        elif new_status == 'accepted':
+            if t.to_municipality_id != municipality_id:
+                return jsonify({'error': 'Only new municipality can accept'}), 403
+            if t.status != 'approved':
+                return jsonify({'error': 'Only approved transfers can be accepted'}), 400
+            # Move user to new municipality and reset admin verification (pending acceptance)
+            user = User.query.get(t.user_id)
+            if not user:
+                return jsonify({'error': 'User not found'}), 404
+            user.municipality_id = t.to_municipality_id
+            user.barangay_id = None
+            user.admin_verified = False
+            user.updated_at = now
+            t.status = 'accepted'
+            t.accepted_at = now
+        else:
+            return jsonify({'error': 'Invalid status'}), 400
+        t.updated_at = now
+        db.session.commit()
+        return jsonify({'message': 'Transfer updated', 'transfer': t.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update transfer', 'details': str(e)}), 500
+
+@admin_bp.route('/benefits/applications/<int:application_id>/status', methods=['PUT'])
+@jwt_required()
+def admin_update_benefit_application_status(application_id: int):
+    """Update benefit application status and send notifications."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        data = request.get_json() or {}
+        new_status = (data.get('status') or '').lower()
+        notes = data.get('admin_notes')
+        rejection_reason = data.get('rejection_reason')
+
+        if new_status not in ['pending', 'under_review', 'approved', 'rejected', 'cancelled']:
+            return jsonify({'error': 'Invalid status'}), 400
+
+        app = BenefitApplication.query.get(application_id)
+        if not app:
+            return jsonify({'error': 'Application not found'}), 404
+
+        program = BenefitProgram.query.get(app.program_id)
+        if not program:
+            return jsonify({'error': 'Program not found'}), 404
+
+        if program.municipality_id and program.municipality_id != municipality_id:
+            return jsonify({'error': 'Application not in your municipality'}), 403
+
+        prev = (app.status or 'pending').lower()
+        app.status = new_status
+        if notes is not None:
+            app.admin_notes = notes
+        if new_status == 'rejected' and rejection_reason:
+            app.rejection_reason = rejection_reason
+        now = datetime.utcnow()
+        app.updated_at = now
+        if new_status == 'under_review':
+            app.reviewed_at = now
+        if new_status == 'approved':
+            app.approved_at = now
+        db.session.commit()
+
+        # Email notifications (best-effort)
+        try:
+            user = User.query.get(app.user_id)
+            if user and user.email:
+                if new_status == 'approved':
+                    send_generic = send_user_status_email  # reuse helper for simple message
+                    send_generic(user.email, approved=True)
+                if new_status == 'rejected':
+                    send_generic = send_user_status_email
+                    send_generic(user.email, approved=False, reason=(app.rejection_reason or notes or ''))
+        except Exception:
+            pass
+
+        return jsonify({'message': 'Status updated', 'application': app.to_dict(include_user=True)}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update application status', 'details': str(e)}), 500
+
+@admin_bp.route('/benefits/programs', methods=['POST'])
+@jwt_required()
+def admin_create_benefit_program():
+    """Create a new benefit program scoped to the admin municipality by default."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        data = request.get_json() or {}
+        name = data.get('name') or data.get('title')
+        code = data.get('code')
+        description = data.get('description') or ''
+        program_type = data.get('program_type') or 'general'
+        program_municipality_id = data.get('municipality_id') or municipality_id
+
+        if not name or not code:
+            return jsonify({'error': 'name and code are required'}), 400
+
+        program = BenefitProgram(
+            name=name,
+            code=code,
+            description=description,
+            program_type=program_type,
+            municipality_id=program_municipality_id,
+            eligibility_criteria=data.get('eligibility_criteria'),
+            required_documents=data.get('required_documents'),
+            application_start=data.get('application_start'),
+            application_end=data.get('application_end'),
+            benefit_amount=data.get('benefit_amount'),
+            benefit_description=data.get('benefit_description'),
+            max_beneficiaries=data.get('max_beneficiaries'),
+            is_active=bool(data.get('is_active', True)),
+            is_accepting_applications=bool(data.get('is_accepting_applications', True)),
+        )
+
+        db.session.add(program)
+        db.session.commit()
+
+        return jsonify({'message': 'Program created', 'program': program.to_dict()}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to create program', 'details': str(e)}), 500
+
+
+@admin_bp.route('/benefits/programs/<int:program_id>', methods=['PUT'])
+@jwt_required()
+def admin_update_benefit_program(program_id: int):
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        program = BenefitProgram.query.get(program_id)
+        if not program:
+            return jsonify({'error': 'Program not found'}), 404
+
+        if program.municipality_id and program.municipality_id != municipality_id:
+            return jsonify({'error': 'Program not in your municipality'}), 403
+
+        data = request.get_json() or {}
+        for field in [
+            'name','code','description','program_type','eligibility_criteria','required_documents',
+            'application_start','application_end','benefit_amount','benefit_description','max_beneficiaries',
+            'is_active','is_accepting_applications'
+        ]:
+            if field in data:
+                setattr(program, field, data[field])
+
+        db.session.commit()
+        return jsonify({'message': 'Program updated', 'program': program.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update program', 'details': str(e)}), 500
+
+
+@admin_bp.route('/benefits/programs/<int:program_id>', methods=['DELETE'])
+@jwt_required()
+def admin_delete_benefit_program(program_id: int):
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        program = BenefitProgram.query.get(program_id)
+        if not program:
+            return jsonify({'error': 'Program not found'}), 404
+
+        if program.municipality_id and program.municipality_id != municipality_id:
+            return jsonify({'error': 'Program not in your municipality'}), 403
+
+        db.session.delete(program)
+        db.session.commit()
+        return jsonify({'message': 'Program deleted'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to delete program', 'details': str(e)}), 500
+
+
+# ---------------------------------------------
+# Reports: Documents and Municipality Performance
+# ---------------------------------------------
+
+def _parse_range(range_param: str):
+    now = datetime.utcnow()
+    if range_param == 'last_7_days':
+        return now - timedelta(days=7), now
+    if range_param == 'last_90_days':
+        return now - timedelta(days=90), now
+    if range_param == 'this_year':
+        start = datetime(now.year, 1, 1)
+        return start, now
+    # default last_30_days
+    return now - timedelta(days=30), now
+
+
+@admin_bp.route('/documents/stats', methods=['GET'])
+@jwt_required()
+def admin_documents_stats():
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        range_param = request.args.get('range', 'last_30_days')
+        start, end = _parse_range(range_param)
+
+        total = DocumentRequest.query\
+            .filter(
+                and_(
+                    DocumentRequest.municipality_id == municipality_id,
+                    DocumentRequest.created_at >= start,
+                    DocumentRequest.created_at <= end,
+                )
+            ).count()
+
+        # Top requested document names if relationship exists; fallback to counts by id
+        try:
+            from apps.api.models.document import DocumentType
+            rows = db.session.query(DocumentType.name, func.count(DocumentRequest.id))\
+                .join(DocumentRequest, DocumentRequest.document_type_id == DocumentType.id)\
+                .filter(
+                    and_(
+                        DocumentRequest.municipality_id == municipality_id,
+                        DocumentRequest.created_at >= start,
+                        DocumentRequest.created_at <= end,
+                    )
+                )\
+                .group_by(DocumentType.name)\
+                .order_by(func.count(DocumentRequest.id).desc())\
+                .limit(5).all()
+            top = [{'name': r[0], 'count': int(r[1])} for r in rows]
+        except Exception:
+            rows = db.session.query(DocumentRequest.document_type_id, func.count(DocumentRequest.id))\
+                .filter(
+                    and_(
+                        DocumentRequest.municipality_id == municipality_id,
+                        DocumentRequest.created_at >= start,
+                        DocumentRequest.created_at <= end,
+                    )
+                )\
+                .group_by(DocumentRequest.document_type_id)\
+                .order_by(func.count(DocumentRequest.id).desc())\
+                .limit(5).all()
+            top = [{'name': str(r[0]), 'count': int(r[1])} for r in rows]
+
+        return jsonify({'total_requests': total, 'top_requested': top}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get document stats', 'details': str(e)}), 500
+
+
+@admin_bp.route('/documents/requests', methods=['GET'])
+@jwt_required()
+def get_document_requests():
+    """Get all document requests for admin's municipality with pagination and filtering."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+
+        # Get filter parameters
+        status = request.args.get('status')
+        delivery = request.args.get('delivery')  # 'digital' | 'pickup'
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        
+        # Build query with joins
+        query = db.session.query(DocumentRequest, User, DocumentType)\
+            .join(User, DocumentRequest.user_id == User.id)\
+            .join(DocumentType, DocumentRequest.document_type_id == DocumentType.id)\
+            .filter(DocumentRequest.municipality_id == municipality_id)
+        
+        # Apply status filter if provided
+        if status:
+            query = query.filter(DocumentRequest.status == status)
+        
+        # Apply delivery method filter if provided
+        if delivery:
+            norm = delivery.lower()
+            if norm == 'pickup':
+                query = query.filter(DocumentRequest.delivery_method == 'physical')
+            elif norm == 'digital':
+                query = query.filter(DocumentRequest.delivery_method == 'digital')
+        
+        # Order by creation date (newest first)
+        query = query.order_by(DocumentRequest.created_at.desc())
+        
+        # Apply pagination
+        requests_paginated = query.paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+        
+        # Format response data
+        requests_data = []
+        for req, user, doc_type in requests_paginated.items:
+            request_data = req.to_dict(include_user=True)
+            request_data['user'] = user.to_dict()
+            request_data['document_type'] = doc_type.to_dict()
+            requests_data.append(request_data)
+        
+        return jsonify({
+            'requests': requests_data,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': requests_paginated.total,
+                'pages': requests_paginated.pages
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to get document requests', 'details': str(e)}), 500
+
+
+@admin_bp.route('/documents/requests/<int:request_id>/generate-pdf', methods=['POST'])
+@jwt_required()
+def generate_document_request_pdf(request_id: int):
+    """Generate PDF for a digital document request using dynamic ReportLab generator."""
+    try:
+        from apps.api.utils.pdf_generator import generate_document_pdf
+
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        req = DocumentRequest.query.get(request_id)
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
+        if req.municipality_id != municipality_id:
+            return jsonify({'error': 'Request not in your municipality'}), 403
+        # Only for digital requests
+        if (req.delivery_method or '').lower() not in ('digital',):
+            return jsonify({'error': 'PDF generation is only available for digital requests'}), 400
+
+        user = User.query.get(req.user_id)
+        doc_type = DocumentType.query.get(req.document_type_id)
+        if not doc_type:
+            return jsonify({'error': 'Document type not found'}), 404
+
+        # Current admin for BY line
+        try:
+            admin_user = User.query.get(get_jwt_identity())
+        except Exception:
+            admin_user = None
+
+        abs_path, rel_path = generate_document_pdf(req, doc_type, user, admin_user=admin_user)
+
+        req.document_file = rel_path
+        req.status = 'ready'
+        req.ready_at = datetime.utcnow()
+        req.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({'message': 'Document generated', 'url': f"/uploads/{rel_path}", 'request': req.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to generate PDF', 'details': str(e)}), 500
+
+
+@admin_bp.route('/documents/requests/<int:request_id>/download', methods=['GET'])
+@jwt_required()
+def download_document_request_pdf(request_id: int):
+    """Return the generated PDF for a request if available."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        req = DocumentRequest.query.get(request_id)
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
+        if req.municipality_id != municipality_id:
+            return jsonify({'error': 'Request not in your municipality'}), 403
+        if not req.document_file:
+            return jsonify({'error': 'No generated document available'}), 404
+
+        # Redirect via uploads handler path (pdf or docx)
+        return jsonify({'url': f"/uploads/{req.document_file}"}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to download PDF', 'details': str(e)}), 500
+
+
+@admin_bp.route('/documents/requests/<int:request_id>/status', methods=['PUT'])
+@jwt_required()
+def update_document_request_status(request_id: int):
+    """Update request status and timestamps with basic transition checks."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        data = request.get_json() or {}
+        new_status = (data.get('status') or '').lower()
+        notes = data.get('admin_notes')
+        rejection_reason = data.get('rejection_reason')
+
+        if new_status not in ['pending', 'processing', 'ready', 'completed', 'rejected', 'cancelled']:
+            return jsonify({'error': 'Invalid status'}), 400
+
+        req = DocumentRequest.query.get(request_id)
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
+        if req.municipality_id != municipality_id:
+            return jsonify({'error': 'Request not in your municipality'}), 403
+
+        # Simple transition guardrails
+        current = (req.status or 'pending').lower()
+        # Idempotent: if status is the same, no-op success
+        if new_status == current:
+            return jsonify({'message': 'Status unchanged', 'request': req.to_dict()}), 200
+        allowed = {
+            'pending': {'processing', 'rejected', 'cancelled'},
+            'processing': {'ready', 'rejected', 'cancelled'},
+            'ready': {'completed', 'rejected', 'cancelled'},
+            'completed': set(),
+            'rejected': set(),
+            'cancelled': set(),
+        }
+        if new_status not in allowed.get(current, set()):
+            return jsonify({'error': f'Invalid transition from {current} to {new_status}'}), 400
+
+        prev_status = (req.status or 'pending').lower()
+        req.status = new_status
+        if notes is not None:
+            req.admin_notes = notes
+        if new_status == 'rejected' and rejection_reason:
+            req.rejection_reason = rejection_reason
+        now = datetime.utcnow()
+        if new_status == 'processing':
+            req.approved_at = now
+        if new_status == 'ready':
+            req.ready_at = now
+        if new_status == 'completed':
+            req.completed_at = now
+        req.updated_at = now
+        db.session.commit()
+
+        # Email notifications (best-effort)
+        try:
+            user = User.query.get(req.user_id)
+            doc_type = DocumentType.query.get(req.document_type_id)
+            if user and user.email and doc_type:
+                if new_status == 'processing' and prev_status == 'pending':
+                    send_document_request_status_email(
+                        user.email,
+                        doc_type.name if hasattr(doc_type, 'name') else 'Document',
+                        (req.created_at.isoformat() if req.created_at else ''),
+                        approved=True,
+                    )
+                if new_status == 'rejected':
+                    send_document_request_status_email(
+                        user.email,
+                        doc_type.name if hasattr(doc_type, 'name') else 'Document',
+                        (req.created_at.isoformat() if req.created_at else ''),
+                        approved=False,
+                        reason=req.rejection_reason or notes or ''
+                    )
+        except Exception:
+            pass
+
+        return jsonify({'message': 'Status updated', 'request': req.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update request status', 'details': str(e)}), 500
+
+
+@admin_bp.route('/municipalities/performance', methods=['GET'])
+@jwt_required()
+def admin_municipality_performance():
+    """If admin is province-level (role 'admin'), return multiple municipalities; otherwise return current only."""
+    try:
+        verify_jwt_in_request()
+        claims = get_jwt() or {}
+        role = claims.get('role')
+        current_id = get_admin_municipality_id()
+        if not current_id:
+            return jsonify({'error': 'Admin access required'}), 403
+
+        range_param = request.args.get('range', 'last_30_days')
+        start, end = _parse_range(range_param)
+
+        def build_perf(m_id: int):
+            users = User.query.filter(and_(User.municipality_id == m_id)).count()
+            listings = MarketplaceItem.query.filter(and_(MarketplaceItem.municipality_id == m_id, MarketplaceItem.created_at >= start, MarketplaceItem.created_at <= end)).count()
+            docs = DocumentRequest.query.filter(and_(DocumentRequest.municipality_id == m_id, DocumentRequest.created_at >= start, DocumentRequest.created_at <= end)).count()
+            name = (Municipality.query.get(m_id).name if Municipality.query.get(m_id) else f"Municipality {m_id}")
+            return {'id': m_id, 'name': name, 'users': users, 'listings': listings, 'documents': docs}
+
+        if role == 'admin':
+            # Province-level: return top N municipalities by activity
+            ids = [m.id for m in Municipality.query.all()]
+            data = [build_perf(mid) for mid in ids]
+        else:
+            data = [build_perf(current_id)]
+
+        return jsonify({'municipalities': data}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get municipality performance', 'details': str(e)}), 500

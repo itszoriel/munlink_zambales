@@ -1,0 +1,15 @@
+| Municipality  | Username            | Email                                                                   | Password             | User ID |
+| ------------- | ------------------- | ----------------------------------------------------------------------- | -------------------- | ------- |
+| Botolan       | admin_botolan       | [munlink.botolan@gmail.com](mailto:munlink.botolan@gmail.com)           | **Botolan123A**      | 1       |
+| Cabangan      | admin_cabangan      | [munlink.cabangan@gmail.com](mailto:munlink.cabangan@gmail.com)         | **Cabangan123A**     | 2       |
+| Candelaria    | admin_candelaria    | [munlink.candelaria@gmail.com](mailto:munlink.candelaria@gmail.com)     | **Candelaria123A**   | 3       |
+| Castillejos   | admin_castillejos   | [munlink.castillejos@gmail.com](mailto:munlink.castillejos@gmail.com)   | **Castillejos123A**  | 4       |
+| Iba           | admin_iba           | [munlink.iba@gmail.com](mailto:munlink.iba@gmail.com)                   | **IbaTown123A**      | 5       |
+| Masinloc      | admin_masinloc      | [munlink.masinloc@gmail.com](mailto:munlink.masinloc@gmail.com)         | **Masinloc123A**     | 6       |
+| Palauig       | admin_palauig       | [munlink.palauig@gmail.com](mailto:munlink.palauig@gmail.com)           | **Palauig123A**      | 7       |
+| San Antonio   | admin_san_antonio   | [munlink.sanantonio@gmail.com](mailto:munlink.sanantonio@gmail.com)     | **SanAntonio123A**   | 8       |
+| San Felipe    | admin_san_felipe    | [munlink.sanfelipe@gmail.com](mailto:munlink.sanfelipe@gmail.com)       | **SanFelipe123A**    | 9       |
+| San Marcelino | admin_san_marcelino | [munlink.sanmarcelino@gmail.com](mailto:munlink.sanmarcelino@gmail.com) | **SanMarcelino123A** | 10      |
+| San Narciso   | admin_san_narciso   | [munlink.sannarciso@gmail.com](mailto:munlink.sannarciso@gmail.com)     | **SanNarciso123A**   | 11      |
+| Santa Cruz    | admin_santa_cruz    | [munlink.stacruz@gmail.com](mailto:munlink.stacruz@gmail.com)           | **SantaCruz123A**    | 12      |
+| Subic         | admin_subic         | [munlink.subic@gmail.com](mailto:munlink.subic@gmail.com)               | **Subic123A**        | 13      |
