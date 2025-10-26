@@ -8,6 +8,7 @@ import Footer from './Footer'
 import AuthStatusBanner from './AuthStatusBanner'
 import Toast from '@/components/ui/Toast'
 import { mediaUrl } from '@/lib/api'
+import { Menu } from 'lucide-react'
 
 export default function Layout() {
   const [scrolled, setScrolled] = useState(false)
@@ -98,6 +99,7 @@ export default function Layout() {
                   </summary>
                   <div className="absolute right-0 mt-3 w-56 bg-white/90 backdrop-blur-xl rounded-xl shadow-2xl border border-white/50 p-2 z-50">
                     <button onClick={() => navigate('/dashboard')} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Dashboard</button>
+                    <button onClick={() => navigate('/my-marketplace')} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">My Marketplace</button>
                     <button onClick={() => navigate('/profile')} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Profile</button>
                     <button onClick={() => logout()} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Logout</button>
                   </div>
@@ -106,7 +108,9 @@ export default function Layout() {
             </div>
 
             {/* Mobile hamburger */}
-            <button className="md:hidden btn-ghost rounded-full" onClick={() => setMobileOpen(true)} aria-label="Open menu">☰</button>
+            <button className="md:hidden btn-ghost rounded-full" onClick={() => setMobileOpen(true)} aria-label="Open menu">
+              <Menu className="w-5 h-5" aria-hidden="true" />
+            </button>
           </div>
         </div>
       </nav>
@@ -137,6 +141,7 @@ export default function Layout() {
             ) : (
               <div className="grid gap-2">
                 <button onClick={() => { setMobileOpen(false); navigate('/dashboard'); }} className="btn-ghost rounded">Dashboard</button>
+                <button onClick={() => { setMobileOpen(false); navigate('/my-marketplace'); }} className="btn-ghost rounded">My Marketplace</button>
                 <button onClick={() => { setMobileOpen(false); navigate('/profile'); }} className="btn-ghost rounded">Profile</button>
                 <button onClick={() => { setMobileOpen(false); logout(); navigate('/login', { replace: true }) }} className="btn-primary rounded">Logout</button>
               </div>

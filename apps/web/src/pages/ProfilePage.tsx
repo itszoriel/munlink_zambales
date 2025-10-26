@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { authApi, mediaUrl, transferApi, showToast } from '@/lib/api'
+import { authApi, mediaUrl, transferApi, showToast, municipalityApi } from '@/lib/api'
 import { ProfileCard, Form, FormField, Input, Button } from '@munlink/ui'
 
 type Profile = {
@@ -10,6 +10,10 @@ type Profile = {
   phone?: string
   address?: string
   profile_picture?: string
+  municipality_id?: number
+  municipality_name?: string
+  barangay_id?: number
+  barangay_name?: string
 }
 
 export default function ProfilePage() {
@@ -24,6 +28,7 @@ export default function ProfilePage() {
   const [showTransferModal, setShowTransferModal] = useState(false)
   const [transferForm, setTransferForm] = useState({ to_municipality_id: '', notes: '' })
   const [municipalities, setMunicipalities] = useState<any[]>([])
+  const [barangays, setBarangays] = useState<any[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -33,7 +38,7 @@ export default function ProfilePage() {
       try {
         const [profileRes, muniRes] = await Promise.all([
           authApi.getProfile(),
-          fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/municipalities`).then(r => r.json())
+          municipalityApi.getAll().then(r => r.data)
         ])
         const data = (profileRes as any).data || profileRes
         if (!cancelled) {
@@ -45,8 +50,18 @@ export default function ProfilePage() {
             phone: data.phone_number || '',
             address: data.street_address || '',
             profile_picture: data.profile_picture || '',
+            municipality_id: data.municipality_id,
+            municipality_name: data.municipality_name,
+            barangay_id: data.barangay_id,
+            barangay_name: data.barangay_name,
           })
           setMunicipalities(muniRes.municipalities || [])
+          if (data.municipality_id) {
+            try {
+              const resB = await municipalityApi.getBarangays(data.municipality_id)
+              setBarangays(resB.data?.barangays || [])
+            } catch { setBarangays([]) }
+          }
         }
       } catch (e: any) {
         if (!cancelled) setError('Failed to load profile')
@@ -77,6 +92,7 @@ export default function ProfilePage() {
       if (form.email) payload.email = form.email // backend ignores unknown, safe
       if (form.phone !== undefined) payload.phone_number = form.phone
       if (form.address !== undefined) payload.street_address = form.address
+      if (form.barangay_id) payload.barangay_id = form.barangay_id
       await authApi.updateProfile(payload)
       setOk('Profile updated')
       showToast('Profile updated successfully', 'success')
@@ -153,6 +169,25 @@ export default function ProfilePage() {
           </FormField>
           <FormField label="Address">
             <Input name="address" value={form.address || ''} onChange={onChange} disabled={loading || saving} />
+          </FormField>
+          <FormField label="Municipality">
+            <Input name="municipality" value={form.municipality_name || ''} disabled />
+          </FormField>
+          <FormField label="Barangay">
+            <select
+              value={form.barangay_id || ''}
+              onChange={(e) => setForm((f) => ({ ...f, barangay_id: Number(e.target.value || '0') || undefined }))}
+              disabled={loading || saving || !form.municipality_id}
+              className="input-field"
+            >
+              <option value="">Select barangay</option>
+              {barangays.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+            {!form.barangay_id && (
+              <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded px-2 py-1 mt-1">Please complete your barangay details to request documents.</div>
+            )}
           </FormField>
           <div className="col-span-full">
             <Button type="submit" disabled={saving || loading}>{saving ? 'Saving…' : 'Save Changes'}</Button>

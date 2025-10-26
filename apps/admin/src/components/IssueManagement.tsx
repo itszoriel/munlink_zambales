@@ -411,7 +411,7 @@ function IssueDetailModal({
             {/* Actions */}
             <div className="flex items-center justify-between pt-4 border-t">
               <div className="flex items-center space-x-3">
-                {issue.status === 'pending' && (
+                {(issue.status === 'submitted' || issue.status === 'pending' || issue.status === 'under_review') && (
                   <button
                     onClick={() => onStatusUpdate(issue.id, 'in_progress')}
                     disabled={loading}
@@ -430,6 +430,15 @@ function IssueDetailModal({
                     {loading ? 'Updating...' : 'Mark Resolved'}
                   </button>
                 )}
+              {issue.status === 'resolved' && (
+                <button
+                  onClick={() => { if (window.confirm('Close this issue? This will finalize the issue and prevent further status changes.')) onStatusUpdate(issue.id, 'closed') }}
+                  disabled={loading}
+                  className="px-4 py-2 text-sm font-medium text-white bg-gray-700 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+                >
+                  {loading ? 'Updating...' : 'Close Issue'}
+                </button>
+              )}
                 
                 {!showResponseForm && (
                   <button

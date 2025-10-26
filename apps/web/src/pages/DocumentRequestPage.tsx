@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { ArrowLeft } from 'lucide-react'
 import { documentsApi, mediaUrl } from '@/lib/api'
 import StatusBadge from '@/components/ui/StatusBadge'
 
@@ -49,7 +50,10 @@ export default function DocumentRequestPage() {
   return (
     <div className="container-responsive py-12">
       <div className="mb-4 flex items-center gap-3">
-        <Link to="/dashboard" className="text-blue-700 hover:underline">← Back to Dashboard</Link>
+        <Link to="/dashboard" className="text-blue-700 hover:underline inline-flex items-center gap-2">
+          <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+          <span>Back to Dashboard</span>
+        </Link>
       </div>
       {loading ? (
         <div className="skeleton-card p-6">
@@ -68,7 +72,7 @@ export default function DocumentRequestPage() {
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div><span className="font-medium">Delivery:</span> {(req.delivery_method === 'physical' ? 'pickup' : req.delivery_method)}{req.delivery_address?` • ${req.delivery_address}`:''}</div>
             <div><span className="font-medium">Purpose:</span> {req.purpose}</div>
-            {req.additional_notes && <div className="sm:col-span-2"><span className="font-medium">Notes:</span> {req.additional_notes}</div>}
+            {req.additional_notes && <div className="sm:col-span-2"><span className="font-medium">Remarks:</span> {req.additional_notes}</div>}
           </div>
           {req.status === 'processing' && (
             <div className="mt-4 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-3">

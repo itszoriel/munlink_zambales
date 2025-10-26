@@ -1,6 +1,7 @@
 """Public/resident Benefits routes (programs and applications)."""
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from datetime import datetime, timedelta
 
 try:
     from apps.api import db
@@ -43,6 +44,25 @@ def list_programs():
             query = query.filter(BenefitProgram.program_type == program_type)
 
         programs = query.order_by(BenefitProgram.created_at.desc()).all()
+
+        # Auto-complete expired programs before returning
+        now = datetime.utcnow()
+        changed = False
+        for p in programs:
+            try:
+                if p.is_active and p.duration_days and p.created_at:
+                    if p.created_at + timedelta(days=int(p.duration_days)) <= now:
+                        p.is_active = False
+                        p.is_accepting_applications = False
+                        p.completed_at = now
+                        changed = True
+            except Exception:
+                pass
+        if changed:
+            db.session.commit()
+            # Filter out programs that were just set inactive
+            programs = [p for p in programs if p.is_active]
+
         return jsonify({'programs': [p.to_dict() for p in programs], 'count': len(programs)}), 200
     except Exception as e:
         return jsonify({'error': 'Failed to get programs', 'details': str(e)}), 500

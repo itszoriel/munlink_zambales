@@ -27,6 +27,8 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: munlink-api
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://munlink_user:${DB_PASSWORD:-munlink_password}@db:5432/munlink_zambales
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}

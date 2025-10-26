@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { ArrowRight, ArrowLeft } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import GatedAction from '@/components/GatedAction'
 import { useAppStore } from '@/lib/store'
 import { benefitsApi } from '@/lib/api'
@@ -27,6 +29,7 @@ export default function BenefitsPage() {
   const [applying, setApplying] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [tab, setTab] = useState<'programs'|'applications'>('programs')
+  const [searchParams] = useSearchParams()
   const [applications, setApplications] = useState<any[]>([])
   const isMismatch = !!(user as any)?.municipality_id && !!selectedMunicipality?.id && (user as any).municipality_id !== selectedMunicipality.id
 
@@ -52,6 +55,12 @@ export default function BenefitsPage() {
     load()
     return () => { cancelled = true }
   }, [selectedMunicipality?.id, typeFilter, tab])
+
+  // Initialize tab from query param (?tab=applications)
+  useEffect(() => {
+    const t = (searchParams.get('tab') || '').toLowerCase()
+    if (t === 'applications') setTab('applications')
+  }, [searchParams])
 
   return (
     <div className="container-responsive py-12">
@@ -151,7 +160,10 @@ export default function BenefitsPage() {
               {(selected?.eligibility || []).map((e, i) => (<li key={i}>{e}</li>))}
             </ul>
             <div className="flex justify-end">
-              <button className="btn btn-primary" onClick={() => setStep(2)}>Continue →</button>
+              <button className="btn btn-primary inline-flex items-center gap-2" onClick={() => setStep(2)}>
+                <span>Continue</span>
+                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+              </button>
             </div>
           </div>
         )}
@@ -162,8 +174,14 @@ export default function BenefitsPage() {
               <textarea className="input-field" rows={4} placeholder="Share any details to support your application" onChange={(e) => setResult({ ...(result || {}), notes: e.target.value })} />
             </div>
             <div className="flex justify-between">
-              <button className="btn btn-secondary" onClick={() => setStep(1)}>← Back</button>
-              <button className="btn btn-primary" onClick={() => setStep(3)}>Continue →</button>
+              <button className="btn btn-secondary inline-flex items-center gap-2" onClick={() => setStep(1)}>
+                <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+                <span>Back</span>
+              </button>
+              <button className="btn btn-primary inline-flex items-center gap-2" onClick={() => setStep(3)}>
+                <span>Continue</span>
+                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+              </button>
             </div>
           </div>
         )}
@@ -175,7 +193,10 @@ export default function BenefitsPage() {
               {result?.notes && <div><span className="font-medium">Notes:</span> {result.notes}</div>}
             </div>
             <div className="flex items-center justify-between">
-              <button className="btn btn-secondary" onClick={() => setStep(2)}>← Back</button>
+              <button className="btn btn-secondary inline-flex items-center gap-2" onClick={() => setStep(2)}>
+                <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+                <span>Back</span>
+              </button>
               <button className="btn btn-primary" disabled={applying} onClick={async () => {
                 setApplying(true)
                 try {

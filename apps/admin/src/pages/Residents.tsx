@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { handleApiError, userApi, mediaUrl } from '../lib/api'
+import { handleApiError, userApi, mediaUrl, transferAdminApi, showToast, municipalitiesApi } from '../lib/api'
 import { useLocation } from 'react-router-dom'
 import { useAdminStore } from '../lib/store'
 import { DataTable, Modal, Button } from '@munlink/ui'
@@ -19,6 +19,9 @@ export default function Residents() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const perPage = 10
+  const [transfers, setTransfers] = useState<any[]>([])
+  const [loadingTransfers, setLoadingTransfers] = useState(false)
+  const [munMap, setMunMap] = useState<Record<number, string>>({})
 
   useEffect(() => {
     let mounted = true
@@ -74,6 +77,57 @@ export default function Residents() {
     return () => { mounted = false }
   }, [])
 
+  // Load transfer requests scoped to admin municipality
+  useEffect(() => {
+    let cancelled = false
+    const loadTransfers = async () => {
+      try {
+        setLoadingTransfers(true)
+        const res = await transferAdminApi.list()
+        const data = (res as any)?.data || res
+        if (!cancelled) setTransfers(data?.transfers || [])
+      } catch (e) {
+        if (!cancelled) console.error('Failed to load transfers', e)
+      } finally {
+        if (!cancelled) setLoadingTransfers(false)
+      }
+    }
+    loadTransfers()
+    return () => { cancelled = true }
+  }, [])
+
+  // Load municipalities map for ID -> name
+  useEffect(() => {
+    let cancelled = false
+    const loadMuns = async () => {
+      try {
+        const res = await municipalitiesApi.list()
+        const data = (res as any)?.data || res
+        const list = data?.municipalities || data || []
+        const map: Record<number, string> = {}
+        for (const m of list) {
+          if (m?.id) map[Number(m.id)] = m.name || m.slug || String(m.id)
+        }
+        if (!cancelled) setMunMap(map)
+      } catch {}
+    }
+    loadMuns()
+    return () => { cancelled = true }
+  }, [])
+
+  const updateTransferStatus = async (id: number, status: 'approved'|'rejected'|'accepted') => {
+    try {
+      setActionLoading(`t-${id}`)
+      await transferAdminApi.updateStatus(id, status)
+      setTransfers(prev => prev.map(t => t.id === id ? { ...t, status, updated_at: new Date().toISOString() } : t))
+      showToast(`Transfer ${status}`, 'success')
+    } catch (e: any) {
+      showToast(handleApiError(e), 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   // Auto-open from query param ?open=<id>
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -107,6 +161,12 @@ export default function Residents() {
 
   const openResident = (resident: any) => {
     setSelected(resident)
+    setDetailOpen(true)
+  }
+
+  const openResidentByUserId = (userId: number) => {
+    // Open modal; it will fetch fresh user details inside
+    setSelected({ id: String(userId), name: '', email: '', phone: '', municipality: '', status: 'pending', joined: '', avatar: 'U' })
     setDetailOpen(true)
   }
 
@@ -151,26 +211,19 @@ export default function Residents() {
     <div className="min-h-screen">
       <div className="">
         <div className="">
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-start justify-between gap-3 mb-8">
             <div>
-              <h1 className="text-3xl font-bold text-neutral-900 mb-2">Residents</h1>
+              <h1 className="text-3xl font-bold text-neutral-900">Residents</h1>
               <p className="text-neutral-600">Manage verified residents and user accounts</p>
             </div>
-            <div className="flex gap-3">
-              <button className="px-6 py-3 bg-white/70 backdrop-blur-xl border border-neutral-200 hover:border-ocean-500 text-neutral-700 rounded-xl font-medium transition-all flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                Export Data
-              </button>
-              <button className="px-6 py-3 bg-ocean-gradient hover:scale-105 text-white rounded-xl font-semibold transition-all shadow-lg flex items-center gap-2">
-                <span className="text-lg">+</span>
-                Add Resident
-              </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button className="btn btn-ghost" aria-label="Export residents">Export Data</button>
             </div>
           </div>
 
-          {/* Filters */}
-          <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-6 shadow-lg border border-white/50 mb-6">
-            <div className="flex flex-col lg:flex-row gap-4">
+          {/* Toolbar: Search + Filters */}
+          <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-4 md:p-6 shadow-lg border border-white/50 mb-6">
+            <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 items-stretch">
               <div className="flex-1 min-w-0">
                 <div className="relative">
                   <input type="search" name="resident_search" id="resident-search" aria-label="Search residents by name, email, or ID number" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search by name, email, or ID number..." className="w-full pl-12 pr-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:border-ocean-500 focus:ring-2 focus:ring-ocean-500/20 transition-all" />
@@ -199,7 +252,7 @@ export default function Residents() {
               </div>
               {/* Municipality is scoped by admin permissions; show a locked chip instead of a selector */}
               {adminMunicipalityName && (
-                <div className="px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl font-medium w-full lg:w-auto flex items-center gap-2">
+                <div className="chip-locked w-full lg:w-auto">
                   <svg className="w-4 h-4 text-neutral-500" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a4 4 0 00-4 4v2H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-1V6a4 4 0 00-4-4zm-2 6V6a2 2 0 114 0v2H8z"/></svg>
                   <span className="truncate">{adminMunicipalityName}</span>
                 </div>
@@ -207,12 +260,101 @@ export default function Residents() {
             </div>
           </div>
 
+          {/* Transfer Requests */}
+          <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-6 shadow-lg border border-white/50 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-semibold">Municipality Transfer Requests</h2>
+                <p className="text-neutral-600 text-sm">Approve (outgoing) or accept (incoming) transfers for {adminMunicipalityName}</p>
+              </div>
+            </div>
+            {loadingTransfers ? (
+              <div className="text-sm text-neutral-600">Loading transfers…</div>
+            ) : transfers.length === 0 ? (
+              <div className="text-sm text-neutral-600">No transfer requests.</div>
+            ) : (
+              <DataTable
+                className="data-table bg-white/70 backdrop-blur-xl"
+                columns={[
+                  { key: 'resident', header: 'Resident', className: 'md:col-span-3 xl:col-span-3', render: (t: any) => (
+                    <div className="flex items-center h-10 min-w-0" title={`Transfer #${t.id}`}>
+                      <span className="font-medium truncate">Transfer #{t.id}</span>
+                    </div>
+                  ) },
+                  { key: 'from', header: 'From', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
+                    <div className="flex items-center h-10">{munMap[Number(t.from_municipality_id)] || t.from_municipality_id}</div>
+                  ) },
+                  { key: 'to', header: 'To', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
+                    <div className="flex items-center h-10">{munMap[Number(t.to_municipality_id)] || t.to_municipality_id}</div>
+                  ) },
+                  { key: 'status', header: 'Status', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
+                    <div className="flex items-center h-10">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${t.status === 'approved' ? 'bg-forest-100 text-forest-700' : t.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : t.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-ocean-100 text-ocean-700'}`}>
+                        {t.status.charAt(0).toUpperCase()+t.status.slice(1)}
+                      </span>
+                    </div>
+                  ) },
+                  { key: 'requested', header: 'Requested', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
+                    <div className="flex items-center h-10">{t.created_at ? new Date(t.created_at).toLocaleString() : ''}</div>
+                  ) },
+                  { key: 'actions', header: 'Actions', className: 'md:col-span-2 xl:col-span-2 text-right min-w-[140px]', render: (t: any) => {
+                    const isPending = t.status === 'pending'
+                    const isApproved = t.status === 'approved'
+                    const canApprove = Number(t.from_municipality_id) === Number(adminMunicipalityId)
+                    const canAccept = Number(t.to_municipality_id) === Number(adminMunicipalityId)
+                    return (
+                      <div className="flex items-center justify-end h-10 gap-1 whitespace-nowrap">
+                        {isPending && (
+                          <>
+                            <button
+                              title={canApprove ? 'Reject' : 'Only source municipality can reject'}
+                              aria-label="Reject"
+                              className="icon-btn danger"
+                              onClick={(e) => { e.stopPropagation(); if (canApprove) updateTransferStatus(t.id,'rejected') }}
+                              disabled={actionLoading===`t-${t.id}` || !canApprove}
+                            >
+                              ✕
+                            </button>
+                            <button
+                              title={canApprove ? 'Approve' : 'Only source municipality can approve'}
+                              aria-label="Approve"
+                              className="icon-btn primary"
+                              onClick={(e) => { e.stopPropagation(); if (canApprove) updateTransferStatus(t.id,'approved') }}
+                              disabled={actionLoading===`t-${t.id}` || !canApprove}
+                            >
+                              ✓
+                            </button>
+                          </>
+                        )}
+                        {isApproved && (
+                          <button
+                            title={canAccept ? 'Accept' : 'Only destination municipality can accept'}
+                            aria-label="Accept"
+                            className="icon-btn success"
+                            onClick={(e) => { e.stopPropagation(); if (canAccept) updateTransferStatus(t.id,'accepted') }}
+                            disabled={actionLoading===`t-${t.id}` || !canAccept}
+                          >
+                            ✔
+                          </button>
+                        )}
+                      </div>
+                    )
+                  } },
+                ]}
+                data={transfers}
+                onRowClick={(t: any) => openResidentByUserId(Number(t.user_id))}
+                emptyState={'No transfer requests'}
+                pagination={undefined}
+              />
+            )}
+          </div>
+
           {/* Table */}
           <DataTable
-            className="bg-white/70 backdrop-blur-xl"
+            className="data-table bg-white/70 backdrop-blur-xl"
             columns={[
               { key: 'resident', header: 'Resident', className: 'md:col-span-3 xl:col-span-3', render: (r: any) => (
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center h-10 gap-3 min-w-0">
                   {r.profile_picture ? (
                     <img src={mediaUrl(r.profile_picture)} alt={r.name} className="w-10 h-10 rounded-xl object-cover" />
                   ) : (
@@ -224,45 +366,32 @@ export default function Residents() {
                 </div>
               ) },
               { key: 'contact', header: 'Contact', className: 'md:col-span-2 xl:col-span-3', render: (r: any) => (
-                <div className="min-w-0">
-                  <p className="text-sm">{r.email}</p>
-                  <p className="text-sm text-neutral-500">{r.phone}</p>
+                <div className="flex items-center h-10 min-w-0">
+                  <span className="truncate" title={`${r.email}${r.phone ? ` • ${r.phone}` : ''}`}>{r.email}{r.phone ? ` • ${r.phone}` : ''}</span>
                 </div>
               ) },
-              { key: 'municipality', header: 'Municipality', className: 'md:col-span-2 xl:col-span-2' },
+              { key: 'municipality', header: 'Municipality', className: 'md:col-span-2 xl:col-span-2', render: (r: any) => (
+                <div className="flex items-center h-10">{r.municipality}</div>
+              ) },
               { key: 'status', header: 'Status', className: 'md:col-span-3 xl:col-span-2', render: (r: any) => (
-                <div>
+                <div className="flex items-center h-10">
                   <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${r.status === 'verified' ? 'bg-forest-100 text-forest-700' : r.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
                     {r.status === 'verified' && '✓ '} {r.status === 'pending' && '⏳ '}
                     {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
                   </span>
-                  <p className="text-xs text-neutral-500 mt-1">Joined {r.joined}</p>
                 </div>
               ) },
               { key: 'actions', header: 'Actions', className: 'md:col-span-2 xl:col-span-2 text-right', render: (r: any) => (
-                <div className="flex items-center justify-end gap-1">
+                <div className="flex items-center justify-end h-10 gap-1 whitespace-nowrap">
                   {r.status === 'pending' ? (
                     <>
-                      <button 
-                        className="px-1 py-0.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50" 
-                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleReject(e as any, r) }} 
-                        disabled={actionLoading === String(r.id)}
-                      >
-                        {actionLoading === String(r.id) ? '…' : 'R'}
-                      </button>
-                      <button 
-                        className="px-1 py-0.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50" 
-                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleApprove(e as any, r) }} 
-                        disabled={actionLoading === String(r.id)}
-                      >
-                        {actionLoading === String(r.id) ? '…' : 'A'}
-                      </button>
+                      <button title="Reject" aria-label="Reject" className="icon-btn danger" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleReject(e as any, r) }} disabled={actionLoading === String(r.id)}>✕</button>
+                      <button title="Approve" aria-label="Approve" className="icon-btn primary" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleApprove(e as any, r) }} disabled={actionLoading === String(r.id)}>✓</button>
                     </>
                   ) : (
                     <>
-                      {/* Suspend/Unsuspend */}
                       <button
-                        className={`px-1 py-0.5 text-xs ${r.status==='suspended' ? 'bg-green-600 hover:bg-green-700' : 'bg-rose-600 hover:bg-rose-700'} text-white rounded disabled:opacity-50`}
+                        className={`icon-btn ${r.status==='suspended' ? 'success' : 'danger'}`}
                         onClick={async (e: React.MouseEvent) => {
                           e.stopPropagation()
                           const id = String(r.id)
@@ -280,15 +409,11 @@ export default function Residents() {
                         }}
                         disabled={actionLoading === String(r.id)}
                         title={r.status==='suspended' ? 'Unsuspend' : 'Suspend'}
+                        aria-label={r.status==='suspended' ? 'Unsuspend' : 'Suspend'}
                       >
-                        {r.status==='suspended' ? 'Un' : ''}S
+                        {r.status==='suspended' ? '↺' : '⏸'}
                       </button>
-                      <button 
-                        className="px-1 py-0.5 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300" 
-                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); openResident(r) }}
-                      >
-                        O
-                      </button>
+                      <button title="Open" aria-label="Open" className="icon-btn" onClick={(e: React.MouseEvent) => { e.stopPropagation(); openResident(r) }}>↗</button>
                     </>
                   )}
                 </div>

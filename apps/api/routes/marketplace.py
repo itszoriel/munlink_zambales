@@ -55,8 +55,18 @@ def list_items():
         # Paginate
         paginated = query.paginate(page=page, per_page=per_page, error_out=False)
         
+        # Include municipality_name for each item
+        items_data = []
+        for item in paginated.items:
+            d = item.to_dict(include_user=True)
+            try:
+                d['municipality_name'] = item.municipality.name if item.municipality else None
+            except Exception:
+                d['municipality_name'] = None
+            items_data.append(d)
+
         return jsonify({
-            'items': [item.to_dict(include_user=True) for item in paginated.items],
+            'items': items_data,
             'total': paginated.total,
             'page': page,
             'per_page': per_page,
@@ -148,7 +158,7 @@ def create_item():
             barangay_id=user.barangay_id,
             pickup_location=data.get('pickup_location'),
             images=[],
-            status='available'
+            status='pending'
         )
         
         db.session.add(item)
@@ -172,13 +182,18 @@ def update_item(item_id):
     """Update an existing item (owner only)."""
     try:
         user_id = get_jwt_identity()
+        # Normalize identity to integer when possible to match DB values
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
         item = Item.query.get(item_id)
         
         if not item:
             return jsonify({'error': 'Item not found'}), 404
         
         # Check ownership
-        if item.user_id != user_id:
+        if item.user_id != uid:
             return jsonify({'error': 'You can only edit your own items'}), 403
         
         data = request.get_json(silent=True) or {}
@@ -226,13 +241,18 @@ def delete_item(item_id):
     """Delete an item (soft delete)."""
     try:
         user_id = get_jwt_identity()
+        # Normalize identity to integer when possible to match DB values
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
         item = Item.query.get(item_id)
         
         if not item:
             return jsonify({'error': 'Item not found'}), 404
         
         # Check ownership
-        if item.user_id != user_id:
+        if item.user_id != uid:
             return jsonify({'error': 'You can only delete your own items'}), 403
         
         # Soft delete
@@ -405,10 +425,18 @@ def accept_transaction(transaction_id):
         if transaction.status != 'pending':
             return jsonify({'error': 'Transaction cannot be accepted in its current state'}), 400
         
-        # Accept transaction
+        # Accept transaction and reserve the item
         transaction.status = 'accepted'
         transaction.updated_at = datetime.utcnow()
-        
+
+        try:
+            item = Item.query.get(transaction.item_id)
+            if item and item.status == 'available':
+                item.status = 'reserved'
+                item.updated_at = datetime.utcnow()
+        except Exception:
+            pass
+
         db.session.commit()
         
         return jsonify({
@@ -419,6 +447,44 @@ def accept_transaction(transaction_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to accept transaction', 'details': str(e)}), 500
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/reject', methods=['POST'])
+@jwt_required()
+def reject_transaction(transaction_id):
+    """Reject a pending transaction request (seller only). Keeps item available for others."""
+    try:
+        user_id = get_jwt_identity()
+        transaction = Transaction.query.get(transaction_id)
+
+        if not transaction:
+            return jsonify({'error': 'Transaction not found'}), 404
+
+        # Only seller can reject
+        if transaction.seller_id != user_id:
+            return jsonify({'error': 'Only the seller can reject this transaction'}), 403
+
+        if transaction.status != 'pending':
+            return jsonify({'error': 'Only pending transactions can be rejected'}), 400
+
+        transaction.status = 'rejected'
+        transaction.updated_at = datetime.utcnow()
+
+        # Ensure item stays available for others
+        try:
+            item = Item.query.get(transaction.item_id)
+            if item and item.is_active:
+                # If anyone had set it otherwise, keep it available for new requests
+                item.status = 'available'
+                item.updated_at = datetime.utcnow()
+        except Exception:
+            pass
+
+        db.session.commit()
+
+        return jsonify({'message': 'Transaction rejected', 'transaction': transaction.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to reject transaction', 'details': str(e)}), 500
 
 
 @marketplace_bp.route('/my-transactions', methods=['GET'])

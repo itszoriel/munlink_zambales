@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { X } from 'lucide-react'
 import GatedAction from '@/components/GatedAction'
 import { marketplaceApi, mediaUrl, showToast } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
@@ -145,6 +146,20 @@ export default function MarketplacePage() {
               </div>
               <h3 className="font-bold mb-2">{item.title}</h3>
               <p className="text-sm text-gray-600 mb-2">Category: {item.category}</p>
+              {(() => {
+                const u = (item as any).user
+                const photo = u?.profile_picture
+                return (
+                  <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
+                    {photo ? (
+                      <img src={mediaUrl(photo)} alt="profile" className="w-6 h-6 rounded-full object-cover border" />
+                    ) : (
+                      <span className="text-[10px] text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">No photo</span>
+                    )}
+                    <span>{u?.username || 'User'}</span>
+                  </div>
+                )
+              })()}
               <p className="text-primary-500 font-bold capitalize">{item.transaction_type}{item.transaction_type==='sell'&& item.price?` • ₱${item.price}`:''}</p>
               <div className="mt-4">
                 {(() => {
@@ -206,7 +221,9 @@ export default function MarketplacePage() {
           <div className="bg-white rounded-lg w-full max-w-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Post an Item</h2>
-              <button onClick={() => setOpen(false)} className="text-neutral-500 hover:text-neutral-700">✕</button>
+              <button onClick={() => setOpen(false)} className="text-neutral-500 hover:text-neutral-700" aria-label="Close">
+                <X className="w-5 h-5" aria-hidden="true" />
+              </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -272,6 +289,7 @@ export default function MarketplacePage() {
                       }
                     }
                     setOpen(false)
+                    showToast('Submitted for admin review. Your listing will appear once approved.', 'success')
                     const fresh = await marketplaceApi.getItems(params)
                     setItems(fresh.data?.items || [])
                     setFiles([])

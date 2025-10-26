@@ -112,6 +112,9 @@ class User(db.Model):
         if include_municipality and self.municipality:
             data['municipality_name'] = self.municipality.name
             data['municipality_slug'] = self.municipality.slug
+        if include_municipality and self.barangay:
+            data['barangay_name'] = self.barangay.name
+            data['barangay_slug'] = self.barangay.slug
         
         # Add admin municipality data if user is admin
         if include_municipality and self.admin_municipality:

@@ -44,6 +44,9 @@ class BenefitProgram(db.Model):
     # Status
     is_active = db.Column(db.Boolean, default=True)
     is_accepting_applications = db.Column(db.Boolean, default=True)
+    # Duration/Completion
+    duration_days = db.Column(db.Integer, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -75,6 +78,8 @@ class BenefitProgram(db.Model):
             'current_beneficiaries': self.current_beneficiaries,
             'is_active': self.is_active,
             'is_accepting_applications': self.is_accepting_applications,
+            'duration_days': self.duration_days,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

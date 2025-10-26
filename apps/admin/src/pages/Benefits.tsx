@@ -9,9 +9,9 @@ export default function Benefits() {
   const [error, setError] = useState<string | null>(null)
   const [programs, setPrograms] = useState<any[]>([])
   const [applications, setApplications] = useState<any[]>([])
+  const [applicationsCount, setApplicationsCount] = useState<number | null>(null)
   const [activeCount, setActiveCount] = useState<number>(0)
   const [beneficiariesTotal, setBeneficiariesTotal] = useState<number | null>(null)
-  const [menuOpen, setMenuOpen] = useState<number | null>(null)
   const [viewProgram, setViewProgram] = useState<any | null>(null)
   const [viewApplicants, setViewApplicants] = useState<{ program: any; applications: any[] } | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -38,14 +38,16 @@ export default function Benefits() {
           title: p.title || p.name || 'Program',
           description: p.description || '—',
           beneficiaries: p.current_beneficiaries || p.beneficiaries || 0,
-          budget: p.benefit_amount ? String(p.benefit_amount) : (p.budget ? String(p.budget) : '—'),
+          duration_days: p.duration_days ?? null,
+          completed_at: p.completed_at || null,
+          is_active: p.is_active !== false,
           status: (p.is_active === false ? 'archived' : 'active'),
           icon: '📋',
           color: 'ocean',
         }))
         if (mounted) {
           setPrograms(mapped)
-          setActiveCount(mapped.length)
+          setActiveCount(mapped.filter((x:any)=>x.is_active).length)
           const total = mapped.reduce((sum: number, it: any) => sum + (Number(it.beneficiaries) || 0), 0)
           setBeneficiariesTotal(isNaN(total) ? null : total)
         }
@@ -74,7 +76,11 @@ export default function Benefits() {
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data?.error || 'Failed to load applications')
-        if (mounted) setApplications(data.applications || [])
+        if (mounted) {
+          setApplications(data.applications || [])
+          const total = (data && typeof data.pagination?.total === 'number') ? data.pagination.total : (data.applications || []).length
+          setApplicationsCount(total)
+        }
       } catch (e: any) {
         setApplications([])
         setError(e.message || 'Failed to load applications')
@@ -106,12 +112,14 @@ export default function Benefits() {
           title: created.name,
           description: created.description,
           beneficiaries: created.current_beneficiaries || 0,
-          budget: created.benefit_amount ? String(created.benefit_amount) : '—',
+          duration_days: created.duration_days ?? null,
+          completed_at: created.completed_at || null,
+          is_active: created.is_active !== false,
           status: created.is_active ? 'active' : 'archived',
           icon: '📋',
           color: 'ocean',
         }, ...prev])
-        setActiveCount((c) => c + 1)
+        setActiveCount((c) => c + (created.is_active ? 1 : 0))
       }
       setCreateOpen(false)
     } catch (e: any) {
@@ -142,14 +150,39 @@ export default function Benefits() {
             <p className="text-sm text-neutral-600">{stat.label}</p>
           </div>
         ))}
+        {!loading && activeTab === 'archived' && programs.filter((p:any)=>!p.is_active).map((program, i) => (
+          <div key={i} className="group bg-white/70 backdrop-blur-xl rounded-3xl shadow-lg border border-white/50">
+            <div className={`relative h-32 bg-gradient-to-br from-${program.color}-400 to-${program.color}-600 flex items-center justify-center`}>
+              <div className="absolute inset-0 bg-white/20" />
+              <span className="relative text-6xl">{program.icon}</span>
+            </div>
+            <div className="p-6">
+              <div className="flex items-start justify-between mb-3">
+                <h3 className="font-bold text-lg text-neutral-900">{program.title}</h3>
+                <span className="px-2 py-1 bg-neutral-100 text-neutral-700 text-xs font-medium rounded-full">Program Completed</span>
+              </div>
+              <p className="text-sm text-neutral-600 mb-4 line-clamp-2">{program.description}</p>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-neutral-50 rounded-xl p-3">
+                  <p className="text-xs text-neutral-600 mb-1">Beneficiaries</p>
+                  <p className="text-lg font-bold text-neutral-900">{program.beneficiaries}</p>
+                </div>
+                <div className="bg-neutral-50 rounded-xl p-3">
+                  <p className="text-xs text-neutral-600 mb-1">Duration (days)</p>
+                  <p className="text-lg font-bold text-neutral-900">{program.duration_days ?? '—'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-2 shadow-lg border border-white/50 mb-6 -mx-2 px-2 overflow-x-auto">
         <div className="inline-flex gap-2 min-w-max">
           {[
             { value: 'active', label: 'Active Programs', count: activeCount },
-            { value: 'applications', label: 'Applications', count: '—' },
-            { value: 'archived', label: 'Archived', count: '—' },
+            { value: 'applications', label: 'Applications', count: applicationsCount === null ? '—' : applicationsCount },
+            { value: 'archived', label: 'Archived', count: programs.filter((p:any)=>!p.is_active).length },
           ].map((tab) => (
             <button key={tab.value} onClick={() => setActiveTab(tab.value as any)} className={`shrink-0 px-6 py-3 rounded-xl font-medium transition-all ${activeTab === tab.value ? 'bg-ocean-gradient text-white shadow-lg' : 'text-neutral-700 hover:bg-neutral-100'}`}>
               {tab.label}
@@ -168,8 +201,8 @@ export default function Benefits() {
             <div className="h-3 w-24 skeleton rounded" />
           </div>
         ))}
-        {!loading && activeTab === 'active' && programs.map((program, i) => (
-          <div key={i} className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-lg border border-white/50 hover:shadow-2xl hover:scale-105 transition-all duration-300">
+        {!loading && activeTab === 'active' && programs.filter((p:any)=>p.is_active).map((program, i) => (
+          <div key={i} className="group bg-white/70 backdrop-blur-xl rounded-3xl shadow-lg border border-white/50 hover:shadow-2xl hover:scale-105 transition-all duration-300">
             <div className={`relative h-32 bg-gradient-to-br from-${program.color}-400 to-${program.color}-600 flex items-center justify-center`}>
               <div className="absolute inset-0 bg-white/10" />
               <span className="relative text-6xl">{program.icon}</span>
@@ -177,7 +210,7 @@ export default function Benefits() {
             <div className="p-6">
               <div className="flex items-start justify-between mb-3">
                 <h3 className="font-bold text-lg text-neutral-900 group-hover:text-ocean-600 transition-colors">{program.title}</h3>
-                <span className="px-2 py-1 bg-forest-100 text-forest-700 text-xs font-medium rounded-full">{program.status === 'active' ? 'Active' : 'Archived'}</span>
+                <span className="px-2 py-1 bg-forest-100 text-forest-700 text-xs font-medium rounded-full">Active</span>
               </div>
               <p className="text-sm text-neutral-600 mb-4 line-clamp-2">{program.description}</p>
               <div className="grid grid-cols-2 gap-3 mb-4">
@@ -186,23 +219,14 @@ export default function Benefits() {
                   <p className="text-lg font-bold text-neutral-900">{program.beneficiaries}</p>
                 </div>
                 <div className="bg-neutral-50 rounded-xl p-3">
-                  <p className="text-xs text-neutral-600 mb-1">Budget</p>
-                  <p className="text-lg font-bold text-neutral-900">{program.budget}</p>
+                  <p className="text-xs text-neutral-600 mb-1">Duration (days)</p>
+                  <p className="text-lg font-bold text-neutral-900">{program.duration_days ?? '—'}</p>
                 </div>
               </div>
               <div className="relative flex gap-2">
                 <button onClick={async () => { try { const res = await benefitsApi.getProgramById(program.id); setViewProgram((res as any)?.data || res) } catch (e: any) { setError(handleApiError(e)) } }} className="flex-1 py-2 bg-ocean-100 hover:bg-ocean-200 text-ocean-700 rounded-xl text-sm font-medium transition-colors">View Details</button>
-                <button aria-haspopup="menu" aria-expanded={menuOpen===program.id} aria-controls={`program-menu-${program.id}`} onClick={() => setMenuOpen(menuOpen === program.id ? null : program.id)} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-sm transition-colors">
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/></svg>
-                </button>
-                {menuOpen === program.id && (
-                  <div id={`program-menu-${program.id}`} role="menu" className="absolute right-0 top-full mt-2 w-40 bg-white rounded-xl shadow-lg border p-1 z-10">
-                    <button role="menuitem" className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 text-sm" onClick={async () => { try { const res = await benefitsApi.getProgramById(program.id); setViewProgram((res as any)?.data || res) } catch (e: any) { setError(handleApiError(e)) } finally { setMenuOpen(null) } }}>View</button>
-                    <button role="menuitem" className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 text-sm" onClick={async () => { setMenuOpen(null); setViewProgram({ ...program, _edit: true }) }}>Edit</button>
-            <button role="menuitem" className="w-full text-left px-3 py-2 rounded-lg hover:bg-neutral-100 text-sm" onClick={async () => { try { setActionLoading(program.id); const res = await fetch(`${(import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:5000'}/api/admin/benefits/programs/${program.id}/applications`, { headers: { 'Authorization': `Bearer ${useAdminStore.getState().accessToken}` } }); const data = await res.json(); if (!res.ok) throw new Error(data?.error || 'Failed to load applicants'); setViewApplicants({ program, applications: data.applications || [] }) } catch (e: any) { setError(e.message || 'Failed to load applicants') } finally { setActionLoading(null); setMenuOpen(null) } }}>View Applicants</button>
-                    <button role="menuitem" className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-sm text-red-700" onClick={async () => { try { setActionLoading(program.id); await benefitsAdminApi.deleteProgram(program.id); setPrograms((prev)=>prev.filter(p=>p.id!==program.id)) } catch (e: any) { setError(handleApiError(e)) } finally { setActionLoading(null); setMenuOpen(null) } }}>Delete</button>
-                  </div>
-                )}
+                <button onClick={() => { setViewProgram({ ...program, _edit: true }) }} className="flex-1 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-sm font-medium transition-colors">Edit</button>
+                <button onClick={async ()=>{ try { setActionLoading(program.id); await benefitsAdminApi.completeProgram(program.id); setPrograms((prev:any[])=> prev.map((p:any)=> p.id===program.id ? { ...p, is_active:false, status:'archived', completed_at: new Date().toISOString() } : p)); setActiveCount((c)=> Math.max(0, c-1)); showToast('Program marked as completed','success') } catch(e:any){ setError(handleApiError(e)) } finally { setActionLoading(null) } }} className="flex-1 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-xl text-sm font-medium transition-colors" disabled={actionLoading===program.id}>Done</button>
               </div>
             </div>
           </div>
@@ -241,11 +265,12 @@ export default function Benefits() {
       {viewProgram && (
         <Modal open={true} onOpenChange={(o)=>{ if(!o) setViewProgram(null) }} title={viewProgram._edit ? 'Edit Program' : 'Program Details'}>
           {viewProgram._edit ? (
-            <ProgramForm initial={{ name: viewProgram.title || viewProgram.name, code: viewProgram.code || '', description: viewProgram.description || '', program_type: viewProgram.program_type || 'general', benefit_amount: viewProgram.benefit_amount }} onCancel={()=> setViewProgram(null)} onSubmit={async (data)=>{ try { setActionLoading(viewProgram.id); await benefitsAdminApi.updateProgram(viewProgram.id, data); setPrograms((prev)=> prev.map(p=> p.id===viewProgram.id ? { ...p, title: data.name || p.title, description: data.description ?? p.description, budget: data.benefit_amount ? String(data.benefit_amount) : p.budget } : p)); setViewProgram(null) } catch(e:any){ setError(handleApiError(e)) } finally { setActionLoading(null) } }} submitting={actionLoading===viewProgram.id} />
+            <ProgramForm initial={{ name: viewProgram.title || viewProgram.name, code: viewProgram.code || '', description: viewProgram.description || '', program_type: viewProgram.program_type || 'general', duration_days: viewProgram.duration_days ?? '' }} onCancel={()=> setViewProgram(null)} onSubmit={async (data)=>{ try { setActionLoading(viewProgram.id); await benefitsAdminApi.updateProgram(viewProgram.id, data); setPrograms((prev)=> prev.map(p=> p.id===viewProgram.id ? { ...p, title: data.name || p.title, description: (data.description ?? p.description), duration_days: (data.duration_days ?? p.duration_days) } : p)); setViewProgram(null) } catch(e:any){ setError(handleApiError(e)) } finally { setActionLoading(null) } }} submitting={actionLoading===viewProgram.id} />
           ) : (
             <div className="space-y-2">
               <p className="text-sm text-neutral-700"><span className="font-medium">Name:</span> {viewProgram.name || viewProgram.title}</p>
               <p className="text-sm text-neutral-700"><span className="font-medium">Type:</span> {viewProgram.program_type || '—'}</p>
+              {typeof viewProgram.duration_days !== 'undefined' && (<p className="text-sm text-neutral-700"><span className="font-medium">Duration:</span> {viewProgram.duration_days ?? '—'} days</p>)}
               <p className="text-sm text-neutral-700 whitespace-pre-wrap"><span className="font-medium">Description:</span> {viewProgram.description}</p>
             </div>
           )}
@@ -283,7 +308,7 @@ export default function Benefits() {
       {/* Create Modal */}
       {createOpen && (
         <Modal open={true} onOpenChange={(o)=>{ if(!o) setCreateOpen(false) }} title="Create Program" className="" >
-          <ProgramForm initial={{ name: '', code: '', description: '', program_type: 'general' }} onCancel={closeCreate} onSubmit={submitCreate} submitting={actionLoading===-1} />
+          <ProgramForm initial={{ name: '', code: '', description: '', program_type: 'general', duration_days: '' }} onCancel={closeCreate} onSubmit={submitCreate} submitting={actionLoading===-1} />
         </Modal>
       )}
     </div>
@@ -322,6 +347,13 @@ function ProgramForm({ initial, onCancel, onSubmit, submitting }: { initial: any
       <div>
         <label className="block text-sm font-medium text-neutral-700 mb-1" htmlFor="program-desc">Description</label>
         <textarea id="program-desc" value={form.description} onChange={(e)=> setForm((p:any)=> ({ ...p, description: e.target.value }))} className="w-full px-3 py-2 border border-neutral-300 rounded-md" rows={5} required />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-neutral-700 mb-1" htmlFor="program-duration">Duration (days)</label>
+        <input id="program-duration" type="number" min={0} placeholder="e.g., 30" value={form.duration_days}
+          onChange={(e)=> setForm((p:any)=> ({ ...p, duration_days: e.target.value === '' ? '' : Number(e.target.value) }))}
+          className="w-full px-3 py-2 border border-neutral-300 rounded-md" />
+        <p className="text-xs text-neutral-500 mt-1">Leave blank to keep the program active until marked Done.</p>
       </div>
       <div className="flex items-center justify-end gap-2 pt-2">
         <Button variant="secondary" size="sm" onClick={onCancel} type="button">Cancel</Button>

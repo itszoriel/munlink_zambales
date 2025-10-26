@@ -136,6 +136,15 @@ export const authApi = {
       }
     }
   },
+  getProfile: async (): Promise<ApiResponse<any>> =>
+    apiClient.get('/api/auth/profile').then(res => res.data),
+  updateProfile: async (data: Partial<{ first_name: string; middle_name?: string; last_name: string; suffix?: string; phone_number?: string; street_address?: string }>): Promise<ApiResponse<any>> =>
+    apiClient.put('/api/auth/profile', data).then(res => res.data),
+  uploadProfilePhoto: async (file: File): Promise<ApiResponse<any>> => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post('/api/auth/profile/photo', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => res.data)
+  },
 }
 
 // Media helper
@@ -241,6 +250,9 @@ export const marketplaceApi = {
     rejected_items: number
   }>> =>
     apiClient.get('/api/admin/marketplace/stats').then(res => res.data),
+  // Public list (scoped by municipality/status) via public endpoint
+  listPublicItems: (params: { municipality_id?: number; status?: string; page?: number; per_page?: number; category?: string; transaction_type?: string } = {}): Promise<ApiResponse<{ items: any[]; total: number; page: number; per_page: number; pages: number }>> =>
+    apiClient.get('/api/marketplace/items', { params }).then(res => res.data),
 }
 
 // Announcements API
@@ -310,6 +322,8 @@ export const benefitsAdminApi = {
     apiClient.post('/api/admin/benefits/programs', data).then((res) => res.data),
   updateProgram: (id: number, data: any): Promise<ApiResponse> =>
     apiClient.put(`/api/admin/benefits/programs/${id}`, data).then((res) => res.data),
+  completeProgram: (id: number): Promise<ApiResponse> =>
+    apiClient.put(`/api/admin/benefits/programs/${id}/complete`, {}).then((res) => res.data),
   deleteProgram: (id: number): Promise<ApiResponse> =>
     apiClient.delete(`/api/admin/benefits/programs/${id}`).then((res) => res.data),
 }
@@ -326,6 +340,19 @@ export const dashboardApi = {
     apiClient.get('/api/admin/dashboard/stats').then(res => res.data),
   getUserGrowth: (range: string = 'last_30_days'): Promise<ApiResponse<{ series: Array<{ day: string; count: number }> }>> =>
     apiClient.get('/api/admin/users/growth', { params: { range } }).then(res => res.data),
+}
+
+// Transfers (Resident Municipality Transfers)
+export const transferAdminApi = {
+  list: (): Promise<ApiResponse<{ transfers: any[]; count: number }>> =>
+    apiClient.get('/api/admin/transfers').then(res => res.data),
+  updateStatus: (id: number, status: 'approved' | 'rejected' | 'accepted'): Promise<ApiResponse<{ transfer: any }>> =>
+    apiClient.put(`/api/admin/transfers/${id}/status`, { status }).then(res => res.data),
+}
+
+export const municipalitiesApi = {
+  list: (): Promise<ApiResponse<{ municipalities: any[] }>> =>
+    apiClient.get('/api/municipalities').then(res => res.data),
 }
 
 // Admin aggregate API matching requested endpoints
@@ -437,6 +464,8 @@ export const documentsAdminApi = {
     apiClient.get(`/api/admin/documents/requests/${id}/download`).then(res => res.data),
   updateStatus: (id: number, status: string, admin_notes?: string, rejection_reason?: string): Promise<ApiResponse<{ request: any }>> =>
     apiClient.put(`/api/admin/documents/requests/${id}/status`, { status, admin_notes, rejection_reason }).then(res => res.data),
+  updateContent: (id: number, data: { purpose?: string; remarks?: string; civil_status?: string; age?: number }): Promise<ApiResponse<{ request: any }>> =>
+    apiClient.put(`/api/admin/documents/requests/${id}/content`, data).then(res => res.data),
 }
 
 export const municipalitiesAdminApi = {

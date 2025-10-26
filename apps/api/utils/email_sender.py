@@ -6,6 +6,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from flask import current_app
+import ssl
 
 
 def send_verification_email(to_email: str, verify_link: str) -> None:
@@ -36,31 +37,37 @@ def send_verification_email(to_email: str, verify_link: str) -> None:
     msg['From'] = formataddr((app_name, from_email))
     msg['To'] = to_email
 
-    # Best effort send; do not raise if fails to avoid blocking registration
+    # Best effort send; raise with detailed logs so caller can surface in DEBUG
     try:
-        with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
-            server.ehlo()
-            try:
-                server.starttls()
+        if not smtp_server:
+            raise RuntimeError("SMTP_SERVER is not configured")
+        if not (smtp_username and smtp_password):
+            raise RuntimeError("SMTP credentials are not configured (SMTP_USERNAME/SMTP_PASSWORD)")
+
+        # Use SSL for 465, STARTTLS for others (e.g., 587)
+        if smtp_port == 465:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context, timeout=10) as server:
                 server.ehlo()
-            except Exception:
-                # Some servers may not support STARTTLS
-                pass
-
-            if smtp_username and smtp_password:
+                server.login(smtp_username, smtp_password)
+                server.sendmail(from_email, [to_email], msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
+                server.ehlo()
                 try:
-                    server.login(smtp_username, smtp_password)
+                    server.starttls(context=ssl.create_default_context())
+                    server.ehlo()
                 except Exception:
-                    # Continue without login if server allows
+                    # STARTTLS may be unsupported on some servers
                     pass
-
-            server.sendmail(from_email, [to_email], msg.as_string())
-    except Exception:
-        # Log silently via Flask logger if available
+                server.login(smtp_username, smtp_password)
+                server.sendmail(from_email, [to_email], msg.as_string())
+    except Exception as exc:
         try:
-            current_app.logger.warning("Failed to send verification email to %s", to_email)
+            current_app.logger.exception("Failed to send verification email to %s: %s", to_email, exc)
         except Exception:
             pass
+        raise
 
 
 def send_generic_email(to_email: str, subject: str, body: str) -> None:

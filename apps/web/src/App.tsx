@@ -16,6 +16,7 @@ import VerifyEmailPage from './pages/VerifyEmailPage'
 import UploadIdPage from './pages/UploadIdPage'
 import ErrorBoundary from './components/ErrorBoundary'
 import ProfilePage from './pages/ProfilePage'
+import MyMarketplacePage from './pages/MyMarketplacePage'
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
           <Route path="upload-id" element={<ProtectedRoute allow={["resident"]}><UploadIdPage /></ProtectedRoute>} />
           <Route path="dashboard" element={<ProtectedRoute allow={["resident"]}><DashboardPage /></ProtectedRoute>} />
           <Route path="profile" element={<ProtectedRoute allow={["resident"]}><ProfilePage /></ProtectedRoute>} />
+          <Route path="my-marketplace" element={<ProtectedRoute allow={["resident"]}><MyMarketplacePage /></ProtectedRoute>} />
           <Route path="marketplace" element={<MarketplacePage />} />
           <Route path="about" element={<About />} />
           <Route path="documents" element={<ProtectedRoute allow={["resident","admin","public"]}><DocumentsPage /></ProtectedRoute>} />

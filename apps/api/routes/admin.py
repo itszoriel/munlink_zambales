@@ -73,9 +73,26 @@ def get_user_detail(user_id):
         user = User.query.get(user_id)
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        # If admin has municipality scope, enforce it
+        # If admin has municipality scope, enforce it, but allow access
+        # when there is an active transfer (pending/approved) that involves
+        # the admin's municipality as source or destination.
         if municipality_id and user.municipality_id != municipality_id and user.role != 'municipal_admin':
-            return jsonify({'error': 'User not in your municipality'}), 403
+            try:
+                from apps.api.models.transfer import TransferRequest
+            except ImportError:
+                from models.transfer import TransferRequest
+            active_transfer = TransferRequest.query.filter(
+                and_(
+                    TransferRequest.user_id == user.id,
+                    TransferRequest.status.in_(['pending', 'approved']),
+                    or_(
+                        TransferRequest.from_municipality_id == municipality_id,
+                        TransferRequest.to_municipality_id == municipality_id,
+                    ),
+                )
+            ).first()
+            if not active_transfer:
+                return jsonify({'error': 'User not in your municipality'}), 403
         return jsonify(user.to_dict(include_sensitive=True, include_municipality=True)), 200
     except Exception as e:
         return jsonify({'error': 'Failed to get user detail', 'details': str(e)}), 500
@@ -626,13 +643,14 @@ def get_pending_marketplace_items():
             pending_items = MarketplaceItem.query.filter(
                 and_(
                     MarketplaceItem.municipality_id == municipality_id,
-                    MarketplaceItem.status == 'pending'
+                    MarketplaceItem.status == 'pending',
+                    MarketplaceItem.is_active == True
                 )
             ).order_by(MarketplaceItem.created_at.desc()).all()
             
             items_data = []
             for item in pending_items:
-                item_data = item.to_dict()
+                item_data = item.to_dict(include_user=True)
                 items_data.append(item_data)
             
             return jsonify({
@@ -666,8 +684,8 @@ def approve_marketplace_item(item_id):
         if item.municipality_id != municipality_id:
             return jsonify({'error': 'Item not in your municipality'}), 403
         
-        # Approve the item
-        item.status = 'approved'
+        # Approve the item (make it available to residents)
+        item.status = 'available'
         item.approved_by = get_jwt_identity()
         item.approved_at = datetime.utcnow()
         item.updated_at = datetime.utcnow()
@@ -731,27 +749,33 @@ def get_marketplace_stats():
         
         # Count marketplace items by status
         total_items = MarketplaceItem.query.filter(
-            MarketplaceItem.municipality_id == municipality_id
+            and_(
+                MarketplaceItem.municipality_id == municipality_id,
+                MarketplaceItem.is_active == True
+            )
         ).count()
         
         pending_items = MarketplaceItem.query.filter(
             and_(
                 MarketplaceItem.municipality_id == municipality_id,
-                MarketplaceItem.status == 'pending'
+                MarketplaceItem.status == 'pending',
+                MarketplaceItem.is_active == True
             )
         ).count()
         
         approved_items = MarketplaceItem.query.filter(
             and_(
                 MarketplaceItem.municipality_id == municipality_id,
-                MarketplaceItem.status == 'approved'
+                MarketplaceItem.status == 'available',
+                MarketplaceItem.is_active == True
             )
         ).count()
         
         rejected_items = MarketplaceItem.query.filter(
             and_(
                 MarketplaceItem.municipality_id == municipality_id,
-                MarketplaceItem.status == 'rejected'
+                MarketplaceItem.status == 'rejected',
+                MarketplaceItem.is_active == True
             )
         ).count()
         
@@ -1041,7 +1065,8 @@ def get_dashboard_stats():
             marketplace_items = MarketplaceItem.query.filter(
                 and_(
                     MarketplaceItem.municipality_id == municipality_id,
-                    MarketplaceItem.status == 'pending'
+                    MarketplaceItem.status == 'pending',
+                    MarketplaceItem.is_active == True
                 )
             ).count()
             stats['marketplace_items'] = marketplace_items
@@ -1088,6 +1113,22 @@ def admin_list_benefit_programs():
             .order_by(BenefitProgram.created_at.desc())
             .all()
         )
+        # Auto-complete expired programs
+        now = datetime.utcnow()
+        changed = False
+        for p in programs:
+            try:
+                if p.is_active and p.duration_days and p.created_at:
+                    from datetime import timedelta as _td
+                    if p.created_at + _td(days=int(p.duration_days)) <= now:
+                        p.is_active = False
+                        p.is_accepting_applications = False
+                        p.completed_at = now
+                        changed = True
+            except Exception:
+                pass
+        if changed:
+            db.session.commit()
 
         return jsonify({
             'programs': [p.to_dict() for p in programs],
@@ -1108,11 +1149,14 @@ def admin_list_benefit_applications():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         status = request.args.get('status')
+        active_only = request.args.get('active_only', 'true').lower() != 'false'
 
         q = BenefitApplication.query.join(BenefitProgram, BenefitApplication.program_id == BenefitProgram.id)
         q = q.filter((BenefitProgram.municipality_id == municipality_id) | (BenefitProgram.municipality_id.is_(None)))
         if status:
             q = q.filter(BenefitApplication.status == status)
+        if active_only:
+            q = q.filter(BenefitProgram.is_active.is_(True))
 
         apps = q.order_by(BenefitApplication.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
         data = []
@@ -1314,6 +1358,7 @@ def admin_create_benefit_program():
             max_beneficiaries=data.get('max_beneficiaries'),
             is_active=bool(data.get('is_active', True)),
             is_accepting_applications=bool(data.get('is_accepting_applications', True)),
+            duration_days=data.get('duration_days'),
         )
 
         db.session.add(program)
@@ -1344,7 +1389,7 @@ def admin_update_benefit_program(program_id: int):
         for field in [
             'name','code','description','program_type','eligibility_criteria','required_documents',
             'application_start','application_end','benefit_amount','benefit_description','max_beneficiaries',
-            'is_active','is_accepting_applications'
+            'is_active','is_accepting_applications','duration_days'
         ]:
             if field in data:
                 setattr(program, field, data[field])
@@ -1377,6 +1422,32 @@ def admin_delete_benefit_program(program_id: int):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to delete program', 'details': str(e)}), 500
+
+
+@admin_bp.route('/benefits/programs/<int:program_id>/complete', methods=['PUT'])
+@jwt_required()
+def admin_complete_benefit_program(program_id: int):
+    """Mark a benefit program as completed (manual Done action)."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        program = BenefitProgram.query.get(program_id)
+        if not program:
+            return jsonify({'error': 'Program not found'}), 404
+        if program.municipality_id and program.municipality_id != municipality_id:
+            return jsonify({'error': 'Program not in your municipality'}), 403
+
+        now = datetime.utcnow()
+        program.is_active = False
+        program.is_accepting_applications = False
+        program.completed_at = now
+        db.session.commit()
+        return jsonify({'message': 'Program marked as completed', 'program': program.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to complete program', 'details': str(e)}), 500
 
 
 # ---------------------------------------------
@@ -1495,7 +1566,7 @@ def get_document_requests():
         # Format response data
         requests_data = []
         for req, user, doc_type in requests_paginated.items:
-            request_data = req.to_dict(include_user=True)
+            request_data = req.to_dict(include_user=True, include_audit=True)
             request_data['user'] = user.to_dict()
             request_data['document_type'] = doc_type.to_dict()
             requests_data.append(request_data)
@@ -1664,6 +1735,43 @@ def update_document_request_status(request_id: int):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to update request status', 'details': str(e)}), 500
+
+
+@admin_bp.route('/documents/requests/<int:request_id>/content', methods=['PUT'])
+@jwt_required()
+def update_document_request_content(request_id: int):
+    """Update admin-edited content for a document request (purpose, remarks, civil_status)."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        req = DocumentRequest.query.get(request_id)
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
+        if req.municipality_id != municipality_id:
+            return jsonify({'error': 'Request not in your municipality'}), 403
+
+        payload = request.get_json(silent=True) or {}
+        allowed_keys = {'purpose', 'remarks', 'civil_status', 'age'}
+        updates = {k: v for k, v in payload.items() if k in allowed_keys}
+
+        # Merge with existing admin_edited_content
+        base = req.admin_edited_content or {}
+        if not isinstance(base, dict):
+            base = {}
+        for k, v in updates.items():
+            base[k] = v
+        req.admin_edited_content = base
+
+        # Do not alter original columns; admin edits are applied during generation
+        req.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({'message': 'Content updated', 'request': req.to_dict(include_user=True, include_audit=True)}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update request content', 'details': str(e)}), 500
 
 
 @admin_bp.route('/municipalities/performance', methods=['GET'])

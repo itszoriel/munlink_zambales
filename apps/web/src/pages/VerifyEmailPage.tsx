@@ -7,10 +7,12 @@ export default function VerifyEmailPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const setAuth = useAppStore((s) => s.setAuth)
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated)
   const [status, setStatus] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState<string>('')
   const [resendStatus, setResendStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [resendMessage, setResendMessage] = useState<string>('')
+  const [emailInput, setEmailInput] = useState<string>('')
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -55,16 +57,35 @@ export default function VerifyEmailPage() {
             <p className={status === 'error' ? 'text-red-600' : 'text-green-700'}>{message}</p>
             {status === 'error' && (
               <div className="mt-4">
+                {!isAuthenticated && (
+                  <div className="mb-2">
+                    <label className="block text-sm font-medium mb-1">Email</label>
+                    <input
+                      type="email"
+                      className="input-field"
+                      placeholder="your.email@example.com"
+                      value={emailInput}
+                      autoComplete="email"
+                      onChange={(e) => setEmailInput(e.target.value)}
+                    />
+                  </div>
+                )}
                 <button
                   onClick={async () => {
                     setResendStatus('sending')
                     setResendMessage('')
                     try {
-                      const res = await authApi.resendVerification()
+                      let res
+                      if (isAuthenticated) {
+                        res = await authApi.resendVerification()
+                      } else {
+                        if (!emailInput) throw new Error('Enter your email to resend the link')
+                        res = await authApi.resendVerificationPublic(emailInput)
+                      }
                       setResendStatus('sent')
                       setResendMessage(res.data?.message || 'Verification email sent')
                     } catch (err: any) {
-                      const msg = err?.response?.data?.error || 'Failed to resend verification email'
+                      const msg = err?.response?.data?.error || err?.message || 'Failed to resend verification email'
                       setResendStatus('error')
                       setResendMessage(msg)
                     }

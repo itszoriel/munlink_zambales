@@ -87,6 +87,7 @@ export const authApi = {
   getProfile: () => api.get('/api/auth/profile'),
   updateProfile: (data: any) => api.put('/api/auth/profile', data),
   resendVerification: () => api.post('/api/auth/resend-verification'),
+  resendVerificationPublic: (email: string) => api.post('/api/auth/resend-verification-public', { email }),
   uploadVerificationDocs: (files: { valid_id_front?: File, valid_id_back?: File, selfie_with_id?: File, municipality_slug?: string }) => {
     const form = new FormData()
     if (files.municipality_slug) form.append('municipality_slug', files.municipality_slug)
@@ -112,7 +113,14 @@ export const marketplaceApi = {
   deleteItem: (id: number) => api.delete(`/api/marketplace/items/${id}`),
   getMyItems: () => api.get('/api/marketplace/my-items'),
   createTransaction: (data: any) => api.post('/api/marketplace/transactions', data),
+  acceptTransaction: (id: number) => api.post(`/api/marketplace/transactions/${id}/accept`),
+  rejectTransaction: (id: number) => api.post(`/api/marketplace/transactions/${id}/reject`),
   getMyTransactions: () => api.get('/api/marketplace/my-transactions'),
+  uploadItemImage: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post(`/api/marketplace/items/${id}/upload`, form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
 }
 
 export const announcementsApi = {

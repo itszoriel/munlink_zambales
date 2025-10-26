@@ -4,6 +4,8 @@ User registration, login, email verification
 """
 from flask import Blueprint, request, jsonify, current_app
 from sqlalchemy import func
+import sqlite3
+from sqlalchemy.exc import OperationalError as SAOperationalError, ProgrammingError as SAProgrammingError
 from flask_jwt_extended import (
     create_access_token, 
     create_refresh_token, 
@@ -93,6 +95,7 @@ def register():
         suffix = data.get('suffix')
         phone_number = validate_phone(data.get('phone_number'))
         municipality_slug = data.get('municipality_slug')
+        barangay_id_raw = data.get('barangay_id')
         
         # Get municipality ID from slug
         municipality_id = None
@@ -100,6 +103,21 @@ def register():
             municipality = Municipality.query.filter_by(slug=municipality_slug).first()
             if municipality:
                 municipality_id = municipality.id
+        # Validate optional barangay_id belongs to municipality if both provided
+        barangay_id = None
+        if barangay_id_raw is not None and str(barangay_id_raw).strip() != '':
+            try:
+                from apps.api.models.municipality import Barangay
+            except ImportError:
+                from models.municipality import Barangay
+            try:
+                bid = int(barangay_id_raw)
+            except Exception:
+                bid = None
+            if bid:
+                b = Barangay.query.get(bid)
+                if b and (not municipality_id or b.municipality_id == municipality_id):
+                    barangay_id = bid
         
         # Check if user already exists
         if User.query.filter_by(username=username).first():
@@ -123,6 +141,7 @@ def register():
             date_of_birth=date_of_birth,
             phone_number=phone_number,
             municipality_id=municipality_id,
+            barangay_id=barangay_id,
             role='resident'
         )
         
@@ -154,19 +173,24 @@ def register():
         # Generate email verification token
         verification_token = generate_verification_token(user.id, 'email')
         # Send verification email
+        email_sent = False
         try:
             from apps.api.utils.email_sender import send_verification_email
             web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
             verify_link = f"{web_url}/verify-email?token={verification_token}"
             send_verification_email(user.email, verify_link)
+            email_sent = True
         except Exception:
             # Non-fatal; registration still succeeds
-            pass
+            email_sent = False
 
-        return jsonify({
+        resp = {
             'message': 'Registration successful. Please check your Gmail to verify your account.',
             'user': user.to_dict(),
-        }), 201
+        }
+        if current_app.config.get('DEBUG'):
+            resp['email_sent'] = email_sent
+        return jsonify(resp), 201
     
     except ValidationError as e:
         return jsonify({'error': str(e)}), 400
@@ -446,20 +470,62 @@ def resend_verification_email():
             return jsonify({'message': 'Email already verified'}), 200
 
         verification_token = generate_verification_token(user.id, 'email')
+        email_sent = False
         try:
             from apps.api.utils.email_sender import send_verification_email
             web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
             verify_link = f"{web_url}/verify-email?token={verification_token}"
             send_verification_email(user.email, verify_link)
+            email_sent = True
         except Exception:
             # Don't fail hard if email service has issues
-            pass
+            email_sent = False
 
-        return jsonify({'message': 'Verification email sent'}), 200
+        resp = {'message': 'Verification email sent'}
+        if current_app.config.get('DEBUG'):
+            resp['email_sent'] = email_sent
+        return jsonify(resp), 200
 
     except Exception as e:
         return jsonify({'error': 'Failed to resend verification email', 'details': str(e)}), 400
 
+
+@auth_bp.route('/resend-verification-public', methods=['POST'])
+def resend_verification_email_public():
+    """Public endpoint to resend email verification link by email address.
+    Always returns 200 to avoid account enumeration.
+    """
+    try:
+        from flask import request
+        data = request.get_json(silent=True) or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'message': 'If an account exists, a verification email has been sent'}), 200
+
+        if user.email_verified:
+            return jsonify({'message': 'Email already verified'}), 200
+
+        verification_token = generate_verification_token(user.id, 'email')
+        email_sent = False
+        try:
+            from apps.api.utils.email_sender import send_verification_email
+            web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
+            verify_link = f"{web_url}/verify-email?token={verification_token}"
+            send_verification_email(user.email, verify_link)
+            email_sent = True
+        except Exception:
+            email_sent = False
+
+        resp = {'message': 'If an account exists, a verification email has been sent'}
+        if current_app.config.get('DEBUG'):
+            resp['email_sent'] = email_sent
+        return jsonify(resp), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to resend verification email', 'details': str(e)}), 400
 
 @auth_bp.route('/profile', methods=['GET'])
 @jwt_required()
@@ -510,6 +576,24 @@ def update_profile():
         if 'street_address' in data:
             user.street_address = data['street_address']
         
+        # Location updates
+        if 'barangay_id' in data:
+            try:
+                from apps.api.models.municipality import Barangay
+            except ImportError:
+                from models.municipality import Barangay
+            bid = data.get('barangay_id')
+            try:
+                bid_int = int(bid) if bid is not None else None
+            except Exception:
+                bid_int = None
+            if bid_int is not None:
+                # Only allow barangay within user's municipality
+                b = Barangay.query.get(bid_int)
+                if not b or (user.municipality_id and b.municipality_id != user.municipality_id):
+                    return jsonify({'error': 'Invalid barangay for your municipality'}), 400
+                user.barangay_id = bid_int
+
         user.updated_at = datetime.utcnow()
         db.session.commit()
         
@@ -523,6 +607,77 @@ def update_profile():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to update profile', 'details': str(e)}), 500
+
+
+@auth_bp.route('/profile/photo', methods=['POST'])
+@jwt_required()
+def upload_profile_photo():
+    """Upload or replace current user's profile photo (admins and residents)."""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        user = User.query.get(uid)
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if not (request.content_type and 'multipart/form-data' in request.content_type):
+            return jsonify({'error': 'File must be uploaded as multipart/form-data'}), 400
+
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+
+        f = request.files['file']
+        if not getattr(f, 'filename', ''):
+            return jsonify({'error': 'Invalid file'}), 400
+
+        # Determine scope for storage path
+        municipality_slug = None
+        try:
+            if getattr(user, 'admin_municipality_id', None):
+                mun = Municipality.query.get(user.admin_municipality_id)
+                municipality_slug = getattr(mun, 'slug', None)
+            if not municipality_slug and getattr(user, 'municipality_id', None):
+                mun = Municipality.query.get(user.municipality_id)
+                municipality_slug = getattr(mun, 'slug', None)
+        except Exception:
+            municipality_slug = None
+
+        category = 'admins' if str(getattr(user, 'role', '')).startswith('admin') or getattr(user, 'role', '') == 'municipal_admin' else 'residents'
+        rel_path = save_profile_picture(f, user.id, municipality_slug or 'general', user_type=category)
+        user.profile_picture = rel_path
+        user.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({'message': 'Profile photo updated', 'user': user.to_dict(include_sensitive=True, include_municipality=True)}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to upload profile photo', 'details': str(e)}), 500
+
+
+@auth_bp.route('/profile/photo', methods=['DELETE'])
+@jwt_required()
+def delete_profile_photo():
+    """Remove current user's profile photo reference (does not delete file)."""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        user = User.query.get(uid)
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        user.profile_picture = None
+        user.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'message': 'Profile photo removed', 'user': user.to_dict(include_sensitive=True, include_municipality=True)}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to remove profile photo', 'details': str(e)}), 500
 
 
 @auth_bp.route('/verification-docs', methods=['POST'])
@@ -638,7 +793,11 @@ def request_transfer():
     """Resident-initiated transfer to another municipality."""
     try:
         user_id = get_jwt_identity()
-        user = User.query.get(user_id)
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        user = User.query.get(uid)
         if not user or user.role != 'resident':
             return jsonify({'error': 'Resident access required'}), 403
         data = request.get_json() or {}
@@ -649,8 +808,18 @@ def request_transfer():
             return jsonify({'error': 'Your current municipality is not set'}), 400
         if int(user.municipality_id) == to_municipality_id:
             return jsonify({'error': 'You are already in this municipality'}), 400
+        # Validate both current and target municipalities exist
+        if not Municipality.query.get(user.municipality_id):
+            return jsonify({'error': 'Your current municipality record no longer exists'}), 400
         if not Municipality.query.get(to_municipality_id):
             return jsonify({'error': 'Target municipality not found'}), 404
+        # Prevent duplicate open requests
+        existing = TransferRequest.query.filter(
+            TransferRequest.user_id == user.id,
+            TransferRequest.status.in_(['pending','approved'])
+        ).first()
+        if existing:
+            return jsonify({'error': 'You already have an active transfer request'}), 400
         t = TransferRequest(
             user_id=user.id,
             from_municipality_id=user.municipality_id,
@@ -661,6 +830,31 @@ def request_transfer():
         db.session.add(t)
         db.session.commit()
         return jsonify({'message': 'Transfer request submitted', 'transfer': t.to_dict()}), 201
+    except (sqlite3.OperationalError, SAOperationalError, SAProgrammingError) as e:
+        # Attempt to auto-initialize missing tables (first-run convenience)
+        try:
+            db.create_all()
+            # retry once
+            try:
+                user_id = get_jwt_identity()
+                user = User.query.get(user_id)
+                data = request.get_json() or {}
+                to_municipality_id = int(data.get('to_municipality_id') or 0)
+                t = TransferRequest(
+                    user_id=user.id,
+                    from_municipality_id=user.municipality_id,
+                    to_municipality_id=to_municipality_id,
+                    status='pending',
+                    notes=data.get('notes'),
+                )
+                db.session.add(t)
+                db.session.commit()
+                return jsonify({'message': 'Transfer request submitted', 'transfer': t.to_dict()}), 201
+            except Exception as retry_err:
+                db.session.rollback()
+                return jsonify({'error': 'Failed to submit transfer', 'details': str(retry_err)}), 500
+        except Exception as init_err:
+            return jsonify({'error': 'Transfer feature not initialized', 'details': str(init_err)}), 500
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to submit transfer', 'details': str(e)}), 500

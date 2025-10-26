@@ -96,6 +96,22 @@ def update_database():
                 else:
                     print("Rejection_reason column already exists in document_requests table")
 
+                # Add audit JSON columns to document_requests table if they don't exist
+                if 'resident_input' not in columns:
+                    print("Adding 'resident_input' column to document_requests table...")
+                    # Use TEXT for SQLite compatibility; app treats as JSON
+                    db.session.execute(text("ALTER TABLE document_requests ADD COLUMN resident_input TEXT"))
+                    print("Added resident_input column to document_requests table")
+                else:
+                    print("Resident_input column already exists in document_requests table")
+
+                if 'admin_edited_content' not in columns:
+                    print("Adding 'admin_edited_content' column to document_requests table...")
+                    db.session.execute(text("ALTER TABLE document_requests ADD COLUMN admin_edited_content TEXT"))
+                    print("Added admin_edited_content column to document_requests table")
+                else:
+                    print("Admin_edited_content column already exists in document_requests table")
+
                 # Check and add columns to issues table
                 result = db.session.execute(text("PRAGMA table_info(issues)")).fetchall()
                 columns = [row[1] for row in result]
@@ -176,6 +192,24 @@ def update_database():
                     else:
                         print(f"{col} column already exists in users table")
 
+                # Check and add columns to benefit_programs table
+                result = db.session.execute(text("PRAGMA table_info(benefit_programs)")).fetchall()
+                columns = [row[1] for row in result]
+
+                if 'duration_days' not in columns:
+                    print("Adding 'duration_days' column to benefit_programs table...")
+                    db.session.execute(text("ALTER TABLE benefit_programs ADD COLUMN duration_days INTEGER"))
+                    print("Added duration_days column to benefit_programs table")
+                else:
+                    print("Duration_days column already exists in benefit_programs table")
+
+                if 'completed_at' not in columns:
+                    print("Adding 'completed_at' column to benefit_programs table...")
+                    db.session.execute(text("ALTER TABLE benefit_programs ADD COLUMN completed_at DATETIME"))
+                    print("Added completed_at column to benefit_programs table")
+                else:
+                    print("Completed_at column already exists in benefit_programs table")
+
                 # Commit all changes
                 db.session.commit()
                 print("\nDatabase update complete!")
@@ -192,7 +226,7 @@ def update_database():
 
                 # Show final table info
                 print("\nUpdated table schemas:")
-                for table_name in ['announcements', 'document_requests', 'issues', 'items', 'users', 'transfer_requests']:
+                for table_name in ['announcements', 'document_requests', 'issues', 'items', 'users', 'benefit_programs', 'transfer_requests']:
                     try:
                         result = db.session.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
                         print(f"\n{table_name} table:")

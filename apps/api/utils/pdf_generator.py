@@ -321,13 +321,78 @@ def generate_document_pdf(request, document_type, user, admin_user: Optional[obj
     except Exception as e:
         print(f"[PDF DEBUG ERROR] {e}")
 
+    # Derive effective content with precedence: admin_edited_content -> original columns -> resident_input
+    import json as _json
+    effective_purpose = None
+    effective_remarks = None
+    effective_civil = None
+    effective_age = None
+    try:
+        edited = getattr(request, 'admin_edited_content', None) or {}
+        if isinstance(edited, str):
+            try:
+                edited = _json.loads(edited)
+            except Exception:
+                edited = {}
+        effective_purpose = (edited.get('purpose') if isinstance(edited, dict) else None) or getattr(request, 'purpose', None)
+        effective_remarks = (edited.get('remarks') if isinstance(edited, dict) else None)
+        effective_civil = (edited.get('civil_status') if isinstance(edited, dict) else None)
+        try:
+            ea = (edited.get('age') if isinstance(edited, dict) else None)
+            if ea is not None:
+                effective_age = int(ea)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        if effective_remarks is None:
+            # Fallback to additional_notes string
+            raw = getattr(request, 'additional_notes', None)
+            if raw and isinstance(raw, str):
+                # If legacy JSON was stored, try to parse and extract text
+                if raw.strip().startswith('{'):
+                    try:
+                        parsed = _json.loads(raw)
+                        if isinstance(parsed, dict):
+                            effective_remarks = str(parsed.get('text') or '') or None
+                            effective_civil = effective_civil or (str(parsed.get('civil_status')) if parsed.get('civil_status') else None)
+                        else:
+                            effective_remarks = raw
+                    except Exception:
+                        effective_remarks = raw
+                else:
+                    effective_remarks = raw
+        # Fallback to resident_input
+        ri = getattr(request, 'resident_input', None) or {}
+        if isinstance(ri, str):
+            try:
+                ri = _json.loads(ri)
+            except Exception:
+                ri = {}
+        if not effective_purpose:
+            effective_purpose = (ri.get('purpose') if isinstance(ri, dict) else None) or getattr(request, 'purpose', '')
+        if effective_remarks is None:
+            effective_remarks = (ri.get('remarks') if isinstance(ri, dict) else None)
+        if not effective_civil:
+            effective_civil = (ri.get('civil_status') if isinstance(ri, dict) else None)
+        if effective_age is None:
+            try:
+                ra = (ri.get('age') if isinstance(ri, dict) else None)
+                if ra is not None:
+                    effective_age = int(ra)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     ctx = {
         'residentName': resident_full_name,
         'resident_name': resident_full_name,
         'address': request.delivery_address or '',
         'municipality': municipality_name,
         'documentType': getattr(document_type, 'name', code),
-        'purpose': request.purpose or '',
+        'purpose': effective_purpose or getattr(request, 'purpose', '') or '',
         'date': issue_date.strftime('%B %d, %Y'),
         'dateRequested': (request.created_at.strftime('%B %d, %Y') if getattr(request, 'created_at', None) else ''),
         'validity': '',
@@ -371,30 +436,29 @@ def generate_document_pdf(request, document_type, user, admin_user: Optional[obj
             lines.append('')
         return lines
 
-    # Extract extended details from additional_notes if JSON
-    import json
-    notes_text = ''
-    civil_status = ''
-    try:
-        raw = getattr(request, 'additional_notes', None)
-        if raw:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                notes_text = str(parsed.get('text') or '')
-                civil_status = str(parsed.get('civil_status') or '')
-            else:
-                notes_text = str(raw)
-    except Exception:
-        notes_text = str(getattr(request, 'additional_notes', '') or '')
+    # Use effective remarks and civil status
+    notes_text = str(effective_remarks or '').strip()
+    civil_status = str(effective_civil or '').strip()
 
     opening = "TO WHOM IT MAY CONCERN:"
+    age_phrase = (f"{effective_age} years old" if isinstance(effective_age, int) and effective_age > 0 else '')
+    cs_phrase = civil_status
+    combined_phrase = ''
+    if age_phrase and cs_phrase:
+        combined_phrase = f"{age_phrase}, {cs_phrase}"
+    elif age_phrase:
+        combined_phrase = age_phrase
+    elif cs_phrase:
+        combined_phrase = cs_phrase
+
     paragraph = (
-        f"This is to certify that {resident_full_name}{(', ' + civil_status) if civil_status else ''}, "
+        f"This is to certify that {resident_full_name}{(', ' + combined_phrase) if combined_phrase else ''}, "
         f"a bona fide resident of {('Barangay ' + barangay_name + ', ') if level=='barangay' and barangay_name else ''}"
         f"Municipality of {municipality_name}, Province of Zambales, has requested a "
         f"{getattr(document_type, 'name', code)} for the purpose of {ctx['purpose']}."
     )
-    extra = notes_text.strip()
+    # Append remarks paragraph if provided
+    extra = notes_text
     issued = (
         f"Issued this {ctx['date']} at the "
         f"{'Office of the Punong Barangay, Barangay ' + barangay_name if level=='barangay' else 'Office of the Municipal Mayor, Municipality of ' + municipality_name}, Province of Zambales."

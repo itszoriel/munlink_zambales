@@ -104,11 +104,20 @@ export default function Issues() {
                   <p className="text-xs text-neutral-600">{it.status.replace('_',' ')}</p>
                 </div>
                 <div className="sm:col-span-3 flex flex-col sm:flex-row gap-2 sm:justify-end">
-                  {it.status !== 'in_progress' && it.status !== 'resolved' && (
+                  {(['submitted','pending','under_review'].includes(it.status)) && (
                     <button onClick={()=> updateStatus(it.id, 'in_progress')} disabled={actionLoading===it.id} className="px-3 py-1.5 rounded-lg bg-yellow-100 hover:bg-yellow-200 text-yellow-700 text-sm disabled:opacity-60">{actionLoading===it.id? 'Updating…':'Mark In Progress'}</button>
                   )}
-                  {it.status !== 'resolved' && (
+                  {it.status === 'in_progress' && (
                     <button onClick={()=> updateStatus(it.id, 'resolved')} disabled={actionLoading===it.id} className="px-3 py-1.5 rounded-lg bg-forest-100 hover:bg-forest-200 text-forest-700 text-sm disabled:opacity-60">{actionLoading===it.id? 'Updating…':'Mark Resolved'}</button>
+                  )}
+                  {it.status === 'resolved' && (
+                    <button
+                      onClick={()=> { if (window.confirm('Close this issue? This will finalize the issue and prevent further status changes.')) updateStatus(it.id, 'closed') }}
+                      disabled={actionLoading===it.id}
+                      className="px-3 py-1.5 rounded-lg bg-neutral-200 hover:bg-neutral-300 text-neutral-800 text-sm disabled:opacity-60"
+                    >
+                      {actionLoading===it.id? 'Updating…':'Close Issue'}
+                    </button>
                   )}
                 </div>
               </div>

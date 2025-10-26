@@ -43,6 +43,9 @@ export default function Requests() {
             delivery_address: r.delivery_address || '',
             request_id: r.id,
             document_file: r.document_file,
+            resident_input: (r as any).resident_input,
+            admin_edited_content: (r as any).admin_edited_content,
+            additional_notes: r.additional_notes,
           }
         })
         if (mounted) setRows(mapped)
@@ -91,6 +94,8 @@ export default function Requests() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [rejectForId, setRejectForId] = useState<number | null>(null)
   const [rejectReason, setRejectReason] = useState<string>('')
+  const [editFor, setEditFor] = useState<null | { id: number; purpose: string; remarks: string; civil_status: string; age?: string }>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
   const visibleRows = rows.filter((r) => {
     // If Ready filter is active, and delivery filter is 'all', force pickup-only per requirements
     const effectiveDelivery = deliveryFilter === 'all' && statusFilter === 'ready' ? 'pickup' : deliveryFilter
@@ -126,6 +131,9 @@ export default function Requests() {
           delivery_address: r.delivery_address || '',
           request_id: r.id,
           document_file: r.document_file,
+          resident_input: (r as any).resident_input,
+          admin_edited_content: (r as any).admin_edited_content,
+          additional_notes: r.additional_notes,
         }
       })
       setRows(mapped)
@@ -335,6 +343,20 @@ export default function Requests() {
                     </span>
                   </div>
                   <div className="sm:col-span-1 text-left sm:text-right space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:justify-end sm:gap-2">
+                    <button
+                      onClick={() => {
+                        const edited = (request as any).admin_edited_content || {}
+                        const resident = (request as any).resident_input || {}
+                        const legacyNotes = (request as any).additional_notes
+                        let remarks = ''
+                        if (edited && edited.remarks) remarks = edited.remarks
+                        else if (resident && resident.remarks) remarks = resident.remarks
+                        else if (typeof legacyNotes === 'string') remarks = legacyNotes
+                        const ageVal = (edited?.age ?? resident?.age)
+                        setEditFor({ id: request.request_id, purpose: (edited?.purpose || request.purpose || ''), remarks: remarks || '', civil_status: (edited?.civil_status || request.civil_status || ''), age: (ageVal !== undefined && ageVal !== null) ? String(ageVal) : '' })
+                      }}
+                      className="w-full sm:w-auto px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                    >Edit</button>
                     {request.status === 'pending' && (
                       <button
                         onClick={() => handleSetProcessing(request)}
@@ -404,6 +426,75 @@ export default function Requests() {
               <button className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm disabled:opacity-60" disabled={!rejectReason || actionLoading===String(rejectForId)} onClick={submitReject}>
                 {actionLoading===String(rejectForId) ? 'Rejecting…' : 'Reject'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit Content Modal */}
+      {editFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setEditFor(null)} />
+          <div className="relative bg-white w-[92%] max-w-lg rounded-xl shadow-xl border p-5">
+            <h3 className="text-lg font-semibold mb-2">Edit Request Content</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Purpose</label>
+                <input className="w-full border border-neutral-300 rounded-md p-2 text-sm" value={editFor.purpose} onChange={(e)=> setEditFor({ ...editFor, purpose: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Remarks or Additional Information</label>
+                <textarea className="w-full border border-neutral-300 rounded-md p-2 text-sm" rows={4} value={editFor.remarks} onChange={(e)=> setEditFor({ ...editFor, remarks: e.target.value })} placeholder="Provide extra context or clarifications" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Civil Status / Age (optional)</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input className="w-full border border-neutral-300 rounded-md p-2 text-sm" value={editFor.civil_status} onChange={(e)=> setEditFor({ ...editFor, civil_status: e.target.value })} placeholder="e.g., single" />
+                  <input className="w-full border border-neutral-300 rounded-md p-2 text-sm" type="number" min={0} value={editFor.age || ''} onChange={(e)=> setEditFor({ ...editFor, age: e.target.value })} placeholder="Age e.g., 22" />
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
+              <button className="px-4 py-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm" onClick={() => setEditFor(null)}>Cancel</button>
+              <button
+                className="px-4 py-2 rounded-lg bg-ocean-600 hover:bg-ocean-700 text-white text-sm disabled:opacity-60"
+                disabled={savingEdit}
+                onClick={async () => {
+                  try {
+                    setSavingEdit(true)
+                    await documentsAdminApi.updateContent(editFor.id, { purpose: editFor.purpose || undefined, remarks: editFor.remarks || undefined, civil_status: editFor.civil_status || undefined, age: (editFor.age && !Number.isNaN(Number(editFor.age))) ? Number(editFor.age) : undefined })
+                    await refresh()
+                    setEditFor(null)
+                    showToast('Content saved', 'success')
+                  } catch (e: any) {
+                    showToast(handleApiError(e), 'error')
+                  } finally {
+                    setSavingEdit(false)
+                  }
+                }}
+              >{savingEdit ? 'Saving…' : 'Save'}</button>
+              <button
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:opacity-60"
+                disabled={savingEdit}
+                onClick={async () => {
+                  try {
+                    setSavingEdit(true)
+                    await documentsAdminApi.updateContent(editFor.id, { purpose: editFor.purpose || undefined, remarks: editFor.remarks || undefined, civil_status: editFor.civil_status || undefined, age: (editFor.age && !Number.isNaN(Number(editFor.age))) ? Number(editFor.age) : undefined })
+                    await documentsAdminApi.updateStatus(editFor.id, 'processing')
+                    const res = await documentsAdminApi.generatePdf(editFor.id)
+                    await refresh()
+                    const url = (res as any)?.url || (res as any)?.data?.url
+                    if (url) {
+                      window.open(mediaUrl(url), '_blank')
+                    }
+                    setEditFor(null)
+                    showToast('Saved and generated', 'success')
+                  } catch (e: any) {
+                    showToast(handleApiError(e), 'error')
+                  } finally {
+                    setSavingEdit(false)
+                  }
+                }}
+              >{savingEdit ? 'Working…' : 'Save & Generate'}</button>
             </div>
           </div>
         </div>

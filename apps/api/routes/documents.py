@@ -59,33 +59,69 @@ def create_document_request():
         if not user.municipality_id or int(user.municipality_id) != int(data['municipality_id']):
             return jsonify({'error': 'You can only request documents in your registered municipality'}), 403
 
+        # Validate delivery rules against selected document type
+        dt = DocumentType.query.get(int(data['document_type_id']))
+        if not dt or not dt.is_active:
+            return jsonify({'error': 'Selected document type is not available'}), 400
+
+        # Digital is allowed only when the type supports digital AND the fee is zero
+        requested_method = (data.get('delivery_method') or '').lower()
+        is_zero_fee = float(dt.fee or 0.0) <= 0.0
+        digital_allowed = bool(dt.supports_digital and is_zero_fee)
+        if requested_method == 'digital' and not digital_allowed:
+            return jsonify({'error': 'This document can only be requested for in-person pickup'}), 400
+
+        # Require barangay on profile for all requests (guided pickup uses profile location)
+        if not getattr(user, 'barangay_id', None):
+            return jsonify({'error': 'Please complete your barangay details in your Profile before requesting documents.'}), 400
+
         # Create request
         # Normalize and capture extended fields
-        additional_details = data.get('additional_details') or data.get('additional_notes')
+        remarks = data.get('remarks') or data.get('additional_notes') or data.get('additional_details')
+        additional_details = data.get('additional_details')
         civil_status = data.get('civil_status')
+        age = data.get('age')
         request_level = data.get('request_level')
+        pickup_location = (data.get('pickup_location') or 'municipal').lower()
 
-        # If new columns are not present in DB yet, store structured data in additional_notes as JSON
-        import json
-        notes_value = additional_details
-        extra_payload = {}
-        if civil_status:
-            extra_payload['civil_status'] = civil_status
-        if request_level:
-            extra_payload['request_level'] = request_level
-        if extra_payload:
-            notes_value = json.dumps({ 'text': additional_details or '', **extra_payload })
+        # Build derived pickup address and barangay selection
+        pickup_address = None
+        if requested_method == 'pickup':
+            muni_name = getattr(getattr(user, 'municipality', None), 'name', data.get('municipality_id'))
+            if pickup_location == 'barangay' and getattr(user, 'barangay', None):
+                pickup_address = f"Barangay {getattr(user.barangay, 'name', '')} Hall, {muni_name}"
+            else:
+                pickup_address = f"Municipal Hall - {muni_name}"
+
+        selected_barangay_id = None
+        if pickup_location == 'barangay':
+            selected_barangay_id = getattr(user, 'barangay_id', None)
+
+        # Build resident_input snapshot for auditability
+        try:
+            resident_input = {
+                'purpose': data.get('purpose'),
+                'remarks': remarks,
+                'civil_status': civil_status,
+                'age': age,
+                'delivery_method': requested_method,
+                'pickup_location': pickup_location,
+                'document_type_id': data.get('document_type_id'),
+            }
+        except Exception:
+            resident_input = None
 
         req = DocumentRequest(
             request_number=f"REQ-{user_id}-{User.query.count()}-{DocumentRequest.query.count()+1}",
             user_id=user_id,
             document_type_id=data['document_type_id'],
             municipality_id=data['municipality_id'],
-            barangay_id=data.get('barangay_id'),
-            delivery_method=data['delivery_method'],
-            delivery_address=data.get('delivery_address'),
+            barangay_id= selected_barangay_id if requested_method == 'pickup' else (data.get('barangay_id') or getattr(user, 'barangay_id', None)),
+            delivery_method=requested_method,
+            # Derive pickup location string from selection; no free-text input
+            delivery_address= pickup_address if requested_method == 'pickup' else data.get('delivery_address'),
             purpose=data['purpose'],
-            additional_notes=notes_value,
+            additional_notes=(remarks or None),
             supporting_documents=data.get('supporting_documents') or [],
             status='pending',
         )
@@ -96,6 +132,12 @@ def create_document_request():
                 setattr(req, 'civil_status', civil_status)
             if hasattr(req, 'request_level') and request_level is not None:
                 setattr(req, 'request_level', request_level)
+            # Backward-safe: only set resident_input if column exists in DB
+            try:
+                if hasattr(req, 'resident_input') and resident_input is not None:
+                    setattr(req, 'resident_input', resident_input)
+            except Exception:
+                pass
         except Exception:
             pass
 

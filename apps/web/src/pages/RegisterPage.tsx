@@ -13,7 +13,8 @@ export default function RegisterPage() {
     middleName: '',
     lastName: '',
     dateOfBirth: '',
-    municipality: ''
+    municipality: '',
+    barangay_id: ''
   })
   const [uploads, setUploads] = useState<{ profile_picture?: File | null; valid_id_front?: File | null; valid_id_back?: File | null }>({})
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -24,6 +25,7 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [municipalities, setMunicipalities] = useState<Municipality[]>([])
+  const [barangays, setBarangays] = useState<{ id: number; name: string }[]>([])
 
   // Load municipalities on component mount
   useEffect(() => {
@@ -41,6 +43,29 @@ export default function RegisterPage() {
     loadMunicipalities()
   }, [])
 
+  // Load barangays when a municipality is selected
+  useEffect(() => {
+    const loadBarangays = async () => {
+      try {
+        setBarangays([])
+        setFormData((f) => ({ ...f, barangay_id: '' }))
+        const mun = municipalities.find(m => m.slug === formData.municipality)
+        if (!mun) return
+        const res = await municipalityApi.getBarangays(mun.id)
+        const list = Array.isArray(res.data?.barangays) ? res.data.barangays : []
+        setBarangays(list.map((b: any) => ({ id: b.id, name: b.name })))
+      } catch (e) {
+        setBarangays([])
+      }
+    }
+    if (formData.municipality) {
+      loadBarangays()
+    } else {
+      setBarangays([])
+      setFormData((f) => ({ ...f, barangay_id: '' }))
+    }
+  }, [formData.municipality, municipalities])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -52,7 +77,7 @@ export default function RegisterPage() {
         setSubmitting(false)
         return
       }
-      const payload = {
+      const payload: any = {
         username: formData.username.trim().toLowerCase(),
         email: formData.email.trim().toLowerCase(),
         password: formData.password,
@@ -62,6 +87,7 @@ export default function RegisterPage() {
         date_of_birth: formData.dateOfBirth,
         municipality_slug: formData.municipality,
       }
+      if (formData.barangay_id) payload.barangay_id = Number(formData.barangay_id)
       const res = await authApi.register(payload, {
         profile_picture: uploads.profile_picture || undefined,
         valid_id_front: uploads.valid_id_front || undefined,
@@ -249,6 +275,20 @@ export default function RegisterPage() {
                 ))}
               </select>
             </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Barangay <span className="text-gray-400">(optional)</span></label>
+            <select
+              className="input-field"
+              value={formData.barangay_id}
+              onChange={(e) => setFormData({ ...formData, barangay_id: e.target.value })}
+              disabled={!formData.municipality || barangays.length === 0}
+            >
+              <option value="">Select your barangay</option>
+              {barangays.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
           </div>
           
           <button type="submit" className="btn-primary w-full disabled:opacity-60" disabled={submitting}>

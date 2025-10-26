@@ -107,6 +107,10 @@ class DocumentRequest(db.Model):
     # Generated Document
     document_file = db.Column(db.String(255), nullable=True)
     
+    # Audit trail (stored as JSON/TEXT for SQLite compatibility)
+    resident_input = db.Column(db.JSON, nullable=True)
+    admin_edited_content = db.Column(db.JSON, nullable=True)
+    
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -130,7 +134,7 @@ class DocumentRequest(db.Model):
     def __repr__(self):
         return f'<DocumentRequest {self.request_number}>'
     
-    def to_dict(self, include_user=False):
+    def to_dict(self, include_user=False, include_audit=False):
         """Convert document request to dictionary."""
         data = {
             'id': self.id,
@@ -161,6 +165,17 @@ class DocumentRequest(db.Model):
         
         if self.document_type:
             data['document_type'] = self.document_type.to_dict()
+        
+        if include_audit:
+            # Ensure JSON-serializable fallback
+            try:
+                data['resident_input'] = self.resident_input
+            except Exception:
+                data['resident_input'] = None
+            try:
+                data['admin_edited_content'] = self.admin_edited_content
+            except Exception:
+                data['admin_edited_content'] = None
         
         return data
 
