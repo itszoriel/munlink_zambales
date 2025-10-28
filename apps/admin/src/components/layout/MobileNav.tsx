@@ -1,12 +1,24 @@
 import { NavLink } from 'react-router-dom'
+import { LayoutDashboard, Users, FileText, ShoppingBag, User as UserIcon } from 'lucide-react'
 
 const items = [
-  { icon: '📊', label: 'Dashboard', path: '/dashboard' },
-  { icon: '👥', label: 'Residents', path: '/residents' },
-  { icon: '📄', label: 'Requests', path: '/requests' },
-  { icon: '🛍️', label: 'Market', path: '/marketplace' },
-  { icon: '👤', label: 'Profile', path: '/profile' },
+  { icon: 'dashboard', label: 'Dashboard', path: '/dashboard' },
+  { icon: 'residents', label: 'Residents', path: '/residents' },
+  { icon: 'requests', label: 'Requests', path: '/requests' },
+  { icon: 'market', label: 'Market', path: '/marketplace' },
+  { icon: 'profile', label: 'Profile', path: '/profile' },
 ]
+
+function IconFor(code: string, className = 'w-5 h-5') {
+  switch (code) {
+    case 'dashboard': return <LayoutDashboard className={className} aria-hidden="true" />
+    case 'residents': return <Users className={className} aria-hidden="true" />
+    case 'requests': return <FileText className={className} aria-hidden="true" />
+    case 'market': return <ShoppingBag className={className} aria-hidden="true" />
+    case 'profile': return <UserIcon className={className} aria-hidden="true" />
+    default: return <LayoutDashboard className={className} aria-hidden="true" />
+  }
+}
 
 export default function MobileNav() {
   return (
@@ -18,7 +30,7 @@ export default function MobileNav() {
             to={item.path}
             className={({ isActive }) => `flex flex-col items-center gap-1 ${isActive ? 'text-ocean-600' : 'text-neutral-600'}`}
           >
-            <span className="text-xl">{item.icon}</span>
+            <span className="text-xl">{IconFor(item.icon, 'w-5 h-5')}</span>
             <span className="text-xs font-medium">{item.label}</span>
           </NavLink>
         ))}

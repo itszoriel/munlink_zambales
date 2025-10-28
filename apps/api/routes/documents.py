@@ -182,6 +182,87 @@ def get_request_detail(request_id: int):
         return jsonify({'error': 'Failed to get request', 'details': str(e)}), 500
 
 
+@documents_bp.route('/requests/<int:request_id>/claim-ticket', methods=['GET'])
+@jwt_required()
+def get_claim_ticket(request_id: int):
+    """Return current claim ticket info for the owner (pickup requests).
+
+    Reuses qr_code (relative path) and qr_data (JSON) fields.
+    """
+    try:
+        user_id = get_jwt_identity()
+        r = DocumentRequest.query.get(request_id)
+        if not r or r.user_id != int(user_id):
+            return jsonify({'error': 'Request not found'}), 404
+        if (r.delivery_method or '').lower() not in ('physical', 'pickup'):
+            return jsonify({'error': 'Not a pickup request'}), 400
+        data = r.qr_data or {}
+        # Optional reveal of plaintext code for owner only
+        reveal = (request.args.get('reveal') or '').strip() not in ('', '0', 'false', 'False')
+        code_plain = None
+        if reveal:
+            try:
+                from apps.api.utils.qr_utils import decrypt_code
+                enc = (data or {}).get('code_enc')
+                if enc:
+                    code_plain = decrypt_code(enc)
+            except Exception:
+                code_plain = None
+        # Build public URL to QR image if stored
+        qr_url = None
+        if r.qr_code:
+            qr_url = f"/uploads/{str(r.qr_code).replace('\\', '/')}"
+        # Resolve names
+        muni_name = getattr(getattr(r, 'municipality', None), 'name', None)
+        doc_name = getattr(getattr(r, 'document_type', None), 'name', None)
+        return jsonify({
+            'request_id': r.id,
+            'request_number': r.request_number,
+            'qr_url': qr_url,
+            'code_masked': data.get('code_masked'),
+            'code_plain': code_plain,
+            'window_start': data.get('window_start'),
+            'window_end': data.get('window_end'),
+            'doc_name': doc_name,
+            'muni_name': muni_name,
+        }), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get claim ticket', 'details': str(e)}), 500
+
+
+@documents_bp.route('/verify/<string:request_number>', methods=['GET'])
+def public_verify_document(request_number: str):
+    """Public verification endpoint for digital documents via request_number.
+
+    Returns validity and limited non-sensitive details.
+    """
+    try:
+        r = DocumentRequest.query.filter_by(request_number=request_number).first()
+        if not r:
+            return jsonify({'valid': False, 'reason': 'not_found'}), 200
+        if (r.delivery_method or '').lower() != 'digital':
+            return jsonify({'valid': False, 'reason': 'not_digital'}), 200
+        if not r.document_file:
+            return jsonify({'valid': False, 'reason': 'no_file'}), 200
+        status = (r.status or '').lower()
+        if status not in ('ready', 'completed'):
+            return jsonify({'valid': False, 'reason': f'status_{status}'}), 200
+        muni_name = getattr(getattr(r, 'municipality', None), 'name', None)
+        doc_name = getattr(getattr(r, 'document_type', None), 'name', None)
+        issued_at = r.ready_at.isoformat() if getattr(r, 'ready_at', None) else None
+        return jsonify({
+            'valid': True,
+            'request_number': r.request_number,
+            'status': r.status,
+            'muni_name': muni_name,
+            'doc_name': doc_name,
+            'issued_at': issued_at,
+            'url': f"/uploads/{str(r.document_file).replace('\\', '/')}"
+        }), 200
+    except Exception as e:
+        return jsonify({'valid': False, 'error': str(e)}), 500
+
+
 @documents_bp.route('/requests/<int:request_id>/upload', methods=['POST'])
 @jwt_required()
 @fully_verified_required

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Users, Building, Heart, Shield, Globe, ArrowRight } from 'lucide-react';
+import { MapPin, Users, Building, Heart, Shield, Globe, ArrowRight, Mail, Phone, Bug, Info } from 'lucide-react';
 
 const About: React.FC = () => {
   const [hoveredMunicipality, setHoveredMunicipality] = useState<string | null>(null);
@@ -38,19 +38,19 @@ const About: React.FC = () => {
 
   // Mapping municipality names to their image filenames
   const municipalityImages: { [key: string]: string } = {
-    'Botolan': 'Botolan Hall.png',
-    'Cabangan': 'Cabangan,Zambalesjf8645_09.png',
-    'Candelaria': 'Candelaria_Municipal_Hall,_Zambales.png',
-    'Castillejos': 'Castillejos.png',
-    'Iba': 'Zambales_Provincial_Capitol_(Olongapo-Bugallon_Road,_Iba,_Zambales__05-21-2023).png',
-    'Masinloc': 'Massive_church(Masinloc,_Zambales).png',
-    'Palauig': 'Palauig,Zambalesjf0969_32.png',
-    'San Antonio': 'San Antonio.png',
-    'San Felipe': 'SanFelipe,Zambalesjf0695_02.png',
-    'San Marcelino': 'San Marcelino.png',
-    'San Narciso': 'San_Narciso_Municipal_Hall,_Zambales,_Aug_2025.png',
-    'Santa Cruz': 'SantaCruz,Zambalesjf9968_08.png',
-    'Subic': 'Subic_Municipal_Hall,_Zambales,_Aug_2025_(1).png'
+    'Botolan': 'botolan_mt_pinatubo.png',
+    'Cabangan': 'cabangan_municipal.png',
+    'Candelaria': 'candelaria_municipal.png',
+    'Castillejos': 'Castillejos_Ramon_Magsaysay_Ancestral_House,_Castillejos.jpg',
+    'Iba': 'iba_municipal.png',
+    'Masinloc': 'masinloc_church.png',
+    'Palauig': 'palauig_municipal.png',
+    'San Antonio': 'san_antonio_municipal.png',
+    'San Felipe': 'san_felipe_arko.png',
+    'San Marcelino': 'san_marcelino_municipal.png',
+    'San Narciso': 'san_narciso_municipal.png',
+    'Santa Cruz': 'Santa_Cruz_Municipal.png',
+    'Subic': 'subic_municipality.png'
   };
 
   // Handle mouse enter with delay
@@ -114,7 +114,7 @@ const About: React.FC = () => {
           <div className="text-center">
             <div className="flex justify-center mb-8">
               <img
-                src={new URL('../../../../public/logos/zambales/512px-Seal_of_Province_of_Zambales.svg.png', import.meta.url).toString()}
+                src="/logos/zambales/512px-Seal_of_Province_of_Zambales.svg.png"
                 alt="Zambales Seal"
                 className="w-32 h-32"
               />
@@ -197,7 +197,7 @@ const About: React.FC = () => {
               MunLink connects all 13 municipalities of Zambales Province
             </p>
             <p className="text-sm text-gray-500 mt-2">
-              Hover over each municipality for 1.5 seconds to see their municipal hall or landmark. The image will stay visible as long as you keep your mouse over the card or the image itself.
+              Hover over each municipality for 1.5 seconds to see a notable landmark. The image will stay visible as long as you keep your mouse over the card or the image itself.
             </p>
           </div>
           
@@ -217,15 +217,13 @@ const About: React.FC = () => {
                 </div>
                 <div className="relative">
                   <img
-                    src={`/Zambales Trademark/${municipalityImages[hoveredMunicipality]}`}
-                    alt={`${hoveredMunicipality} Municipal Hall`}
+                    src={`/landmarks/${municipalityImages[hoveredMunicipality]}`}
+                    alt={`${hoveredMunicipality} Landmark`}
                     className="w-full h-auto rounded-lg shadow-lg animate-in fade-in duration-500 delay-150"
                     style={{ maxHeight: '60vh', objectFit: 'contain' }}
                   />
                   <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-4 rounded-b-lg">
-                    <p className="text-white text-sm">
-                      {hoveredMunicipality === 'Iba' ? 'Provincial Capitol' : 'Municipal Hall'} - {hoveredMunicipality}, Zambales
-                    </p>
+                    <p className="text-white text-sm">Landmark - {hoveredMunicipality}, Zambales</p>
                   </div>
                 </div>
               </div>
@@ -253,59 +251,44 @@ const About: React.FC = () => {
         </div>
       </section>
 
-      {/* Technology Section */}
+      {/* Support Section */}
       <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-start">
+            {/* Left: Contact Actions */}
             <div>
-              <h2 className="text-3xl font-bold text-gray-900 mb-6">Built with Modern Technology</h2>
+              <h2 className="text-3xl font-bold text-gray-900 mb-4">Found a Bug? We're Here to Help</h2>
               <p className="text-lg text-gray-600 mb-6">
-                MunLink is built using cutting-edge web technologies to ensure 
-                reliability, security, and excellent user experience across all devices.
+                Contact Paul directly — we’ll investigate and fix issues as quickly as possible.
               </p>
-              <div className="space-y-4">
-                <div className="flex items-center">
-                  <div className="w-2 h-2 bg-primary-500 rounded-full mr-3"></div>
-                  <span className="text-gray-700">React 18 with TypeScript for robust frontend</span>
+              <div className="flex items-center gap-6">
+                <div className="inline-flex items-center text-gray-800">
+                  <Mail className="h-5 w-5 mr-2 text-primary-600" />
+                  <span>Email: Pauljohn.antigo@gmail.com</span>
                 </div>
-                <div className="flex items-center">
-                  <div className="w-2 h-2 bg-primary-500 rounded-full mr-3"></div>
-                  <span className="text-gray-700">Flask with SQLAlchemy for scalable backend</span>
-                </div>
-                <div className="flex items-center">
-                  <div className="w-2 h-2 bg-primary-500 rounded-full mr-3"></div>
-                  <span className="text-gray-700">JWT authentication with bcrypt security</span>
-                </div>
-                <div className="flex items-center">
-                  <div className="w-2 h-2 bg-primary-500 rounded-full mr-3"></div>
-                  <span className="text-gray-700">Mobile-first responsive design</span>
+                <span className="text-gray-300">|</span>
+                <div className="inline-flex items-center text-gray-800">
+                  <Phone className="h-5 w-5 mr-2 text-primary-600" />
+                  <span>Phone: 09764859463</span>
                 </div>
               </div>
+              <p className="text-sm text-gray-500 mt-4">Urgent issue or outage? Text or call for the fastest response.</p>
             </div>
+
+            {/* Right: What to include */}
             <div className="bg-gray-50 rounded-lg p-8">
-              <h3 className="text-2xl font-bold text-gray-900 mb-4">Security & Privacy</h3>
-              <p className="text-gray-600 mb-6">
-                Your data security and privacy are our top priorities. We implement 
-                industry-standard security measures to protect your information.
-              </p>
+              <h3 className="text-2xl font-bold text-gray-900 mb-4 flex items-center"><Bug className="h-6 w-6 text-primary-600 mr-2" /> Help Us Reproduce the Issue</h3>
               <ul className="space-y-2 text-gray-700">
-                <li className="flex items-center">
-                  <Shield className="h-4 w-4 text-green-500 mr-2" />
-                  End-to-end encryption for sensitive data
-                </li>
-                <li className="flex items-center">
-                  <Shield className="h-4 w-4 text-green-500 mr-2" />
-                  Regular security audits and updates
-                </li>
-                <li className="flex items-center">
-                  <Shield className="h-4 w-4 text-green-500 mr-2" />
-                  GDPR-compliant data handling
-                </li>
-                <li className="flex items-center">
-                  <Shield className="h-4 w-4 text-green-500 mr-2" />
-                  Secure file upload and storage
-                </li>
+                <li className="flex items-start"><div className="w-2 h-2 bg-primary-500 rounded-full mr-3 mt-2"></div><span>Clear steps to reproduce the problem</span></li>
+                <li className="flex items-start"><div className="w-2 h-2 bg-primary-500 rounded-full mr-3 mt-2"></div><span>What you expected vs. what actually happened</span></li>
+                <li className="flex items-start"><div className="w-2 h-2 bg-primary-500 rounded-full mr-3 mt-2"></div><span>Page URL and approximate time it occurred</span></li>
+                <li className="flex items-start"><div className="w-2 h-2 bg-primary-500 rounded-full mr-3 mt-2"></div><span>Your browser and device (e.g., Chrome on Android)</span></li>
+                <li className="flex items-start"><div className="w-2 h-2 bg-primary-500 rounded-full mr-3 mt-2"></div><span>Screenshots or a short screen recording</span></li>
               </ul>
+              <div className="mt-4 flex items-start text-sm text-gray-600">
+                <Info className="h-4 w-4 text-gray-500 mr-2 mt-0.5" />
+                <span>Please avoid sharing sensitive personal information in screenshots or recordings.</span>
+              </div>
             </div>
           </div>
         </div>
@@ -318,8 +301,7 @@ const About: React.FC = () => {
             Ready to Experience Digital Municipal Services?
           </h2>
           <p className="text-xl text-primary-100 mb-8 max-w-2xl mx-auto">
-            Join thousands of Zambales residents who are already using MunLink 
-            for their municipal service needs.
+            Be among the first Zambales residents to try MunLink for your municipal service needs.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
@@ -330,10 +312,10 @@ const About: React.FC = () => {
               <ArrowRight className="h-4 w-4 ml-2" />
             </Link>
             <Link
-              to="/municipalities"
+              to="/announcements"
               className="inline-flex items-center px-6 py-3 border-2 border-white text-white rounded-lg hover:bg-white hover:text-primary-600 transition-colors font-medium"
             >
-              Explore Municipalities
+              Latest Announcement
             </Link>
           </div>
         </div>
@@ -343,13 +325,8 @@ const About: React.FC = () => {
       <section className="py-12 bg-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            <p className="text-gray-600 mb-4">
+            <p className="text-gray-600">
               MunLink Zambales - Connecting Communities, Empowering Citizens
-            </p>
-            <p className="text-sm text-gray-500">
-              © 2025 MunLink Zambales. All rights reserved. | 
-              <Link to="/privacy" className="ml-1 hover:text-primary-600">Privacy Policy</Link> | 
-              <Link to="/terms" className="ml-1 hover:text-primary-600">Terms of Service</Link>
             </p>
           </div>
         </div>

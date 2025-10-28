@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import api, { authApi } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 
 export default function VerifyEmailPage() {
   const location = useLocation()
-  const navigate = useNavigate()
   const setAuth = useAppStore((s) => s.setAuth)
   const isAuthenticated = useAppStore((s) => s.isAuthenticated)
   const [status, setStatus] = useState<'idle' | 'verifying' | 'success' | 'error'>('idle')

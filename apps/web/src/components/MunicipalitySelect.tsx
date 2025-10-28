@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore, type Municipality } from '@/lib/store'
 
 const MUNICIPALITIES: Municipality[] = [
@@ -21,6 +21,7 @@ export default function MunicipalitySelect() {
   const selected = useAppStore((s) => s.selectedMunicipality)
   const setMunicipality = useAppStore((s) => s.setMunicipality)
   const [query, setQuery] = useState('')
+  const detailsRef = useRef<HTMLDetailsElement>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem('munlink:selectedMunicipality')
@@ -38,7 +39,7 @@ export default function MunicipalitySelect() {
 
   return (
     <div className="relative">
-      <details className="group">
+      <details ref={detailsRef} className="group">
         <summary className="list-none cursor-pointer select-none hover:text-ocean-700 font-serif">
           {selected ? selected.name : 'Municipality'} ▾
         </summary>
@@ -54,7 +55,7 @@ export default function MunicipalitySelect() {
             {filtered.map(m => (
               <li key={m.id}>
                 <button
-                  onClick={() => setMunicipality(m)}
+                  onClick={() => { setMunicipality(m); try { if (detailsRef.current) detailsRef.current.open = false } catch {} }}
                   className="w-full text-left px-3 py-2 rounded hover:bg-ocean-50"
                 >
                   {m.name}

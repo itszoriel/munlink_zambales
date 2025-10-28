@@ -15,6 +15,7 @@ import Reports from './pages/Reports'
 import Profile from './pages/Profile'
 import Announcements from './pages/Announcements'
 import Issues from './pages/Issues'
+import VerifyTicket from './pages/VerifyTicket'
 
 export default function App() {
   const isAuthenticated = useAdminStore((s) => s.isAuthenticated)
@@ -77,6 +78,16 @@ export default function App() {
             <ProtectedRoute>
               <AdminLayout>
                 <Requests />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/verify-ticket"
+          element={
+            <ProtectedRoute>
+              <AdminLayout>
+                <VerifyTicket />
               </AdminLayout>
             </ProtectedRoute>
           }

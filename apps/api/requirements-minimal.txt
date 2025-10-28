@@ -11,6 +11,7 @@ SQLAlchemy==2.0.23
 # Authentication & Security
 bcrypt==4.1.1
 PyJWT==2.8.0
+cryptography==42.0.5
 
 # File Handling
 Werkzeug==3.0.1

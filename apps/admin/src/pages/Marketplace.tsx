@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { adminApi, handleApiError, marketplaceApi, mediaUrl, showToast } from '../lib/api'
 import { useAdminStore } from '../lib/store'
+import { ShoppingBag, Hourglass, CheckCircle, XCircle, Store, BadgeDollarSign, Handshake, Gift, Check, X } from 'lucide-react'
 
 export default function Marketplace() {
   const [filter, setFilter] = useState<'all' | 'sell' | 'lend' | 'donate'>('all')
@@ -103,13 +104,18 @@ export default function Marketplace() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-8">
         {[
-          { icon: '🛍️', label: 'Total Items', value: String(stats?.total_items ?? '—'), color: 'ocean' },
-          { icon: '⏳', label: 'Pending Review', value: String(stats?.pending_items ?? '—'), color: 'sunset' },
-          { icon: '✅', label: 'Approved', value: String(stats?.approved_items ?? '—'), color: 'forest' },
-          { icon: '❌', label: 'Rejected', value: String(stats?.rejected_items ?? '—'), color: 'purple' },
+          { icon: 'total', label: 'Total Items', value: String(stats?.total_items ?? '—'), color: 'ocean' },
+          { icon: 'pending', label: 'Pending Review', value: String(stats?.pending_items ?? '—'), color: 'sunset' },
+          { icon: 'approved', label: 'Approved', value: String(stats?.approved_items ?? '—'), color: 'forest' },
+          { icon: 'rejected', label: 'Rejected', value: String(stats?.rejected_items ?? '—'), color: 'purple' },
         ].map((stat, i) => (
           <div key={i} className="bg-white/70 backdrop-blur-xl rounded-2xl p-6 border border-white/50 shadow-lg hover:scale-105 transition-transform">
-            <div className={`inline-flex w-12 h-12 bg-${stat.color}-100 rounded-xl items-center justify-center text-2xl mb-3`}>{stat.icon}</div>
+            <div className={`inline-flex w-12 h-12 bg-${stat.color}-100 rounded-xl items-center justify-center mb-3`}>
+              {stat.icon === 'total' && <ShoppingBag className="w-6 h-6" aria-hidden="true" />}
+              {stat.icon === 'pending' && <Hourglass className="w-6 h-6" aria-hidden="true" />}
+              {stat.icon === 'approved' && <CheckCircle className="w-6 h-6" aria-hidden="true" />}
+              {stat.icon === 'rejected' && <XCircle className="w-6 h-6" aria-hidden="true" />}
+            </div>
             <p className="text-3xl font-bold text-neutral-900 mb-1">{stat.value}</p>
             <p className="text-sm text-neutral-600 mb-2">{stat.label}</p>
           </div>
@@ -120,13 +126,18 @@ export default function Marketplace() {
         <div className="inline-flex items-center gap-4 min-w-max">
           <div className="flex gap-2">
             {[
-              { value: 'all', label: 'All Items', icon: '🏪' },
-              { value: 'sell', label: 'For Sale', icon: '💰' },
-              { value: 'lend', label: 'For Lending', icon: '🤝' },
-              { value: 'donate', label: 'Free', icon: '🎁' },
+              { value: 'all', label: 'All Items', icon: 'store' },
+              { value: 'sell', label: 'For Sale', icon: 'money' },
+              { value: 'lend', label: 'For Lending', icon: 'handshake' },
+              { value: 'donate', label: 'Free', icon: 'gift' },
             ].map((type) => (
               <button key={type.value} onClick={() => setFilter(type.value as any)} className={`shrink-0 px-4 py-2 rounded-xl font-medium transition-all ${filter === type.value ? 'bg-ocean-gradient text-white shadow-lg' : 'bg-neutral-50 text-neutral-700 hover:bg-neutral-100'}`}>
-                <span className="mr-2">{type.icon}</span>
+                <span className="mr-2 inline-flex items-center">
+                  {type.icon === 'store' && <Store className="w-4 h-4" aria-hidden="true" />}
+                  {type.icon === 'money' && <BadgeDollarSign className="w-4 h-4" aria-hidden="true" />}
+                  {type.icon === 'handshake' && <Handshake className="w-4 h-4" aria-hidden="true" />}
+                  {type.icon === 'gift' && <Gift className="w-4 h-4" aria-hidden="true" />}
+                </span>
                 {type.label}
               </button>
             ))}
@@ -171,18 +182,19 @@ export default function Marketplace() {
                 <img
                   src={mediaUrl(item.image)}
                   alt={item.title}
+                  loading="lazy"
                   className="absolute inset-0 w-full h-full object-cover"
                 />
               )}
               <div className="absolute top-3 left-3 z-10">
-                <span className={`px-3 py-1 rounded-full text-xs font-semibold text-white backdrop-blur-md ${item.type === 'sell' ? 'bg-forest-500/90' : item.type === 'lend' ? 'bg-ocean-500/90' : 'bg-sunset-500/90'}`}>
-                  {item.type === 'sell' && '💰 For Sale'}
-                  {item.type === 'lend' && '🤝 For Lending'}
-                  {item.type === 'donate' && '🎁 Free'}
+                <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold text-white backdrop-blur-md ${item.type === 'sell' ? 'bg-forest-500/90' : item.type === 'lend' ? 'bg-ocean-500/90' : 'bg-sunset-500/90'}`}>
+                  {item.type === 'sell' && <><BadgeDollarSign className="w-4 h-4" aria-hidden="true" /><span>For Sale</span></>}
+                  {item.type === 'lend' && <><Handshake className="w-4 h-4" aria-hidden="true" /><span>For Lending</span></>}
+                  {item.type === 'donate' && <><Gift className="w-4 h-4" aria-hidden="true" /><span>Free</span></>}
                 </span>
               </div>
               {/* Removed non-functional eye/menu icons to simplify UI */}
-              <div className="absolute bottom-3 left-3"><span className="px-3 py-1 bg-forest-100 text-forest-700 rounded-full text-xs font-semibold">✓ Active</span></div>
+              <div className="absolute bottom-3 left-3"><span className="inline-flex items-center gap-1 px-3 py-1 bg-forest-100 text-forest-700 rounded-full text-xs font-semibold"><Check className="w-4 h-4" aria-hidden="true" /> Active</span></div>
             </div>
             <div className="p-4">
               <div className="flex items-start justify-between mb-2">
@@ -217,14 +229,17 @@ export default function Marketplace() {
       </div>
 
       {reviewItem && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-3xl p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setReviewItem(null) }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setReviewItem(null)} />
+          <div className="relative bg-white rounded-2xl w-full max-w-full sm:max-w-2xl xl:max-w-3xl p-4 sm:p-6 pb-24 sm:pb-6 shadow-2xl max-h-[90vh] overflow-y-auto" tabIndex={-1} autoFocus>
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 className="text-xl font-semibold">Review Listing</h2>
                 <p className="text-xs text-neutral-600">Ensure this item complies with community guidelines.</p>
               </div>
-              <button onClick={() => setReviewItem(null)} className="text-neutral-500 hover:text-neutral-700">✕</button>
+              <button onClick={() => setReviewItem(null)} className="text-neutral-500 hover:text-neutral-700" aria-label="Close">
+                <X className="w-5 h-5" aria-hidden="true" />
+              </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">

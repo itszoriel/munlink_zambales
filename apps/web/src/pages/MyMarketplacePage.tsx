@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import { marketplaceApi, mediaUrl, showToast } from '@/lib/api'
+import Modal from '@/components/ui/Modal'
 
 type MyItem = {
   id: number
@@ -19,10 +21,12 @@ type MyTx = {
   transaction_type: string
   created_at?: string
   as?: 'buyer' | 'seller'
+  pickup_at?: string
 }
 
 export default function MyMarketplacePage() {
   const [tab, setTab] = useState<'items' | 'transactions'>('items')
+  const [searchParams] = useSearchParams()
   const [items, setItems] = useState<MyItem[]>([])
   const [txs, setTxs] = useState<MyTx[]>([])
   const [loading, setLoading] = useState(true)
@@ -32,6 +36,20 @@ export default function MyMarketplacePage() {
   const [editForm, setEditForm] = useState<{ title: string; description: string; price?: string; images: string[] }>({ title: '', description: '', price: '', images: [] })
   const [uploadFiles, setUploadFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
+  const [acceptingTx, setAcceptingTx] = useState<MyTx | null>(null)
+  const [acceptPickupAt, setAcceptPickupAt] = useState<string>('')
+  const [acceptPickupLocation, setAcceptPickupLocation] = useState<string>('')
+
+  const minPickupLocal = useMemo(() => {
+    const d = new Date(Date.now() + 5 * 60 * 1000)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const yyyy = d.getFullYear()
+    const mm = pad(d.getMonth() + 1)
+    const dd = pad(d.getDate())
+    const hh = pad(d.getHours())
+    const mi = pad(d.getMinutes())
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -58,6 +76,13 @@ export default function MyMarketplacePage() {
     return () => { cancelled = true }
   }, [])
 
+  // Initialize tab from query param (?tab=transactions)
+  useEffect(() => {
+    const t = (searchParams.get('tab') || '').toLowerCase()
+    if (t === 'transactions') setTab('transactions')
+    if (t === 'items') setTab('items')
+  }, [searchParams])
+
   const reloadItems = async () => {
     try {
       const myItemsRes = await marketplaceApi.getMyItems()
@@ -65,12 +90,12 @@ export default function MyMarketplacePage() {
     } catch {}
   }
 
-  const sellerPending = useMemo(() => txs.filter((t) => t.as === 'seller' && t.status === 'pending'), [txs])
+  // removed unused sellerPending calculation to satisfy noUnusedLocals
 
   return (
     <div className="container-responsive py-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold">My Marketplace</h1>
+        <h1 className="text-fluid-3xl font-serif font-semibold">My Marketplace</h1>
         <div className="inline-flex rounded-lg border overflow-hidden">
           <button onClick={() => setTab('items')} className={`px-4 py-2 text-sm ${tab==='items'?'bg-ocean-600 text-white':'bg-white hover:bg-neutral-50'}`}>My Items</button>
           <button onClick={() => setTab('transactions')} className={`px-4 py-2 text-sm ${tab==='transactions'?'bg-ocean-600 text-white':'bg-white hover:bg-neutral-50'}`}>My Transactions</button>
@@ -95,7 +120,7 @@ export default function MyMarketplacePage() {
             <div key={it.id} className="card">
               <div className="w-full aspect-[4/3] bg-gray-100 rounded-lg mb-3 overflow-hidden">
                 {it.images?.[0] && (
-                  <img src={mediaUrl(it.images[0])} alt={it.title} className="w-full h-full object-cover" />
+                  <img src={mediaUrl(it.images[0])} alt={it.title} loading="lazy" className="w-full h-full object-cover" />
                 )}
               </div>
               <h3 className="font-semibold mb-1 truncate">{it.title}</h3>
@@ -156,24 +181,23 @@ export default function MyMarketplacePage() {
                 <div className="text-xs text-gray-600">{(t.created_at || '').slice(0,10)} • {t.as === 'seller' ? 'You are the seller' : 'You are the buyer'}</div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`px-2 py-1 text-xs rounded-full ${t.status==='accepted'?'bg-emerald-50 text-emerald-700':'bg-amber-50 text-amber-700'}`}>{t.status}</span>
+                <span className={`px-2 py-1 text-xs rounded-full ${t.status==='accepted'?'bg-emerald-50 text-emerald-700': (t.status==='awaiting_buyer'?'bg-blue-50 text-blue-700':'bg-amber-50 text-amber-700')}`}>{t.status}</span>
+                {(t.status === 'accepted' || t.status === 'awaiting_buyer') && t.pickup_at && (
+                  <span className="text-xs text-gray-600">Pickup: {new Date(t.pickup_at).toLocaleString()}</span>
+                )}
+                {(t.status === 'accepted' || t.status === 'awaiting_buyer') && (t as any).pickup_location && (
+                  <span className="text-xs text-gray-600">Location: {(t as any).pickup_location}</span>
+                )}
                 {t.as === 'seller' && t.status === 'pending' && (
                   <>
                     <button
                       className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
                       disabled={acceptingId === t.id}
-                      onClick={async () => {
+                      onClick={() => {
                         setAcceptingId(t.id)
-                        try {
-                          await marketplaceApi.acceptTransaction(t.id)
-                          setTxs((prev) => prev.map((x) => x.id === t.id ? { ...x, status: 'accepted' } : x))
-                          showToast('Transaction accepted', 'success')
-                        } catch (e: any) {
-                          const msg = e?.response?.data?.error || 'Failed to accept transaction'
-                          showToast(msg, 'error')
-                        } finally {
-                          setAcceptingId(null)
-                        }
+                        setAcceptingTx(t)
+                        setAcceptPickupAt(minPickupLocal)
+                        setAcceptPickupLocation('')
                       }}
                     >
                       {acceptingId === t.id ? 'Accepting…' : 'Accept'}
@@ -195,6 +219,40 @@ export default function MyMarketplacePage() {
                     </button>
                   </>
                 )}
+                {t.as === 'buyer' && t.status === 'awaiting_buyer' && (
+                  <>
+                    <button
+                      className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                      onClick={async () => {
+                        try {
+                          await marketplaceApi.confirmTransaction(t.id)
+                          setTxs((prev) => prev.map((x) => x.id === t.id ? { ...x, status: 'accepted' } : x))
+                          showToast('You confirmed the pickup. Transaction accepted.', 'success')
+                        } catch (e: any) {
+                          const msg = e?.response?.data?.error || 'Failed to confirm'
+                          showToast(msg, 'error')
+                        }
+                      }}
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      className="text-xs px-2 py-1 rounded border border-rose-200 text-rose-700 hover:bg-rose-50"
+                      onClick={async () => {
+                        try {
+                          await marketplaceApi.buyerRejectProposal(t.id)
+                          setTxs((prev) => prev.map((x) => x.id === t.id ? { ...x, status: 'rejected' } : x))
+                          showToast('Proposal rejected. The item is available again.', 'success')
+                        } catch (e: any) {
+                          const msg = e?.response?.data?.error || 'Failed to reject'
+                          showToast(msg, 'error')
+                        }
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -204,8 +262,8 @@ export default function MyMarketplacePage() {
         </div>
       )}
       {editItem && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl w-full max-w-2xl p-6">
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setEditItem(null) }}>
+          <div className="bg-white rounded-xl w-full max-w-2xl p-6" tabIndex={-1} autoFocus>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Edit Item</h2>
               <button onClick={() => setEditItem(null)} className="text-neutral-500 hover:text-neutral-700" aria-label="Close">
@@ -228,7 +286,7 @@ export default function MyMarketplacePage() {
                 </div>
               )}
               <div className="sm:col-span-2">
-                <label className="block text-sm font-medium mb-1">Images</label>
+                <label htmlFor="edit-images" className="block text-sm font-medium mb-1">Images</label>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {editForm.images.map((img, idx) => (
                     <div key={`${img}-${idx}`} className="relative">
@@ -244,7 +302,7 @@ export default function MyMarketplacePage() {
                     </div>
                   ))}
                 </div>
-                <input type="file" accept="image/*" multiple onChange={(e) => setUploadFiles(Array.from(e.target.files || []).slice(0,5))} />
+                <input id="edit-images" name="edit_images" className="input-field" type="file" accept="image/*" multiple onChange={(e) => setUploadFiles(Array.from(e.target.files || []).slice(0,5))} />
               </div>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
@@ -283,7 +341,73 @@ export default function MyMarketplacePage() {
           </div>
         </div>
       )}
+
+      {/* Accept transaction modal */}
+      <_AcceptModal
+        tx={acceptingTx}
+        value={acceptPickupAt || minPickupLocal}
+        locationValue={acceptPickupLocation}
+        min={minPickupLocal}
+        onChange={setAcceptPickupAt}
+        onChangeLocation={setAcceptPickupLocation}
+        onCancel={() => { setAcceptingTx(null); setAcceptingId(null) }}
+        onConfirm={async () => {
+          if (!acceptingTx) return
+          try {
+            const isoUtc = new Date(acceptPickupAt || minPickupLocal).toISOString()
+            await marketplaceApi.proposeTransaction(acceptingTx.id, { pickup_at: isoUtc, pickup_location: acceptPickupLocation })
+            setTxs((prev) => prev.map((x) => x.id === acceptingTx.id ? { ...x, status: 'awaiting_buyer', pickup_at: isoUtc, pickup_location: acceptPickupLocation } : x))
+            showToast('Pickup details proposed. Awaiting buyer confirmation.', 'success')
+            setAcceptingTx(null)
+            setAcceptingId(null)
+          } catch (e: any) {
+            const msg = e?.response?.data?.error || 'Failed to accept transaction'
+            showToast(msg, 'error')
+          }
+        }}
+      />
     </div>
+  )
+}
+
+// Accept modal
+// Rendered at end of component to avoid layout shifts
+function _AcceptModal({ tx, value, locationValue, min, onChange, onChangeLocation, onCancel, onConfirm }: { tx: MyTx | null, value: string, locationValue: string, min: string, onChange: (v: string) => void, onChangeLocation: (v: string) => void, onCancel: () => void, onConfirm: () => void }) {
+  if (!tx) return null
+  return (
+    <Modal
+      isOpen={!!tx}
+      onClose={onCancel}
+      title="Schedule Pickup"
+      footer={(
+        <div className="flex items-center justify-end gap-2">
+          <button className="btn-secondary" onClick={onCancel}>Cancel</button>
+          <button className="btn-primary" onClick={onConfirm}>Confirm</button>
+        </div>
+      )}
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-gray-600">Select a pickup date and time for this transaction. This will be shared with the other party.</p>
+        <label className="block text-sm font-medium mb-1">Pickup date & time</label>
+        <input
+          type="datetime-local"
+          value={value}
+          min={min}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full border rounded px-3 py-2"
+          required
+        />
+        <label className="block text-sm font-medium mb-1 mt-2">Pickup location</label>
+        <input
+          type="text"
+          value={locationValue}
+          placeholder="Enter pickup location (e.g., municipal hall lobby)"
+          onChange={(e) => onChangeLocation(e.target.value)}
+          className="w-full border rounded px-3 py-2"
+          required
+        />
+      </div>
+    </Modal>
   )
 }
 

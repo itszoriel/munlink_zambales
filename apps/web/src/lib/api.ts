@@ -113,7 +113,12 @@ export const marketplaceApi = {
   deleteItem: (id: number) => api.delete(`/api/marketplace/items/${id}`),
   getMyItems: () => api.get('/api/marketplace/my-items'),
   createTransaction: (data: any) => api.post('/api/marketplace/transactions', data),
-  acceptTransaction: (id: number) => api.post(`/api/marketplace/transactions/${id}/accept`),
+  // New proposal/confirmation flow
+  proposeTransaction: (id: number, data: { pickup_at: string, pickup_location: string }) => api.post(`/api/marketplace/transactions/${id}/propose`, data),
+  confirmTransaction: (id: number) => api.post(`/api/marketplace/transactions/${id}/confirm`),
+  buyerRejectProposal: (id: number) => api.post(`/api/marketplace/transactions/${id}/reject-buyer`),
+  // Legacy accept (kept for compatibility in case other screens still call it)
+  acceptTransaction: (id: number, data: { pickup_at: string, pickup_location: string }) => api.post(`/api/marketplace/transactions/${id}/accept`, data),
   rejectTransaction: (id: number) => api.post(`/api/marketplace/transactions/${id}/reject`),
   getMyTransactions: () => api.get('/api/marketplace/my-transactions'),
   uploadItemImage: (id: number, file: File) => {
@@ -134,6 +139,8 @@ export const documentsApi = {
   getMyRequests: () => api.get('/api/documents/my-requests'),
   getRequest: (id: number) => api.get(`/api/documents/requests/${id}`),
   uploadSupportingDocs: (id: number, form: FormData) => api.post(`/api/documents/requests/${id}/upload`, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  getClaimTicket: (id: number, params?: any) => api.get(`/api/documents/requests/${id}/claim-ticket`, { params }),
+  publicVerify: (requestNumber: string) => api.get(`/api/documents/verify/${encodeURIComponent(requestNumber)}`),
 }
 
 export const issuesApi = {
@@ -160,15 +167,9 @@ export const transferApi = {
 }
 
 // Toast helper for consistent notifications
-export const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+export const showToast = (message: string, _type: 'success' | 'error' | 'info' = 'info') => {
   // Use browser alert for now - in a real app you'd use a toast library
-  if (type === 'success') {
-    alert(`✅ ${message}`)
-  } else if (type === 'error') {
-    alert(`❌ ${message}`)
-  } else {
-    alert(`ℹ️ ${message}`)
-  }
+  alert(message)
 }
 
 export const mediaUrl = (p?: string): string => {

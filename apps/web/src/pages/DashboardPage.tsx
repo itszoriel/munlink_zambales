@@ -3,12 +3,14 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { marketplaceApi, documentsApi, benefitsApi } from '@/lib/api'
 import Modal from '@/components/ui/Modal'
+import { StatusBadge } from '@munlink/ui'
+import ClaimTicketModal from '@/components/ClaimTicketModal'
 import { useAppStore } from '@/lib/store'
 import { FileText, Package, ShoppingBag, Plus, ArrowRight, User, AlertTriangle } from 'lucide-react'
 
 type MyItem = { id: number, title: string, status: string }
 type MyTx = { id: number, status: string, transaction_type: string, as: 'buyer' | 'seller' }
-type MyReq = { id: number, request_number: string, status: string, document_type?: { name: string } }
+type MyReq = { id: number, request_number: string, status: string, delivery_method?: string, document_type?: { name: string } }
 type MyBenefitApp = { id: number, status: string, application_number: string, created_at?: string, supporting_documents?: string[], program?: { name?: string } }
 
 export default function DashboardPage() {
@@ -19,6 +21,8 @@ export default function DashboardPage() {
   const [apps, setApps] = useState<MyBenefitApp[]>([])
   const [appModalOpen, setAppModalOpen] = useState(false)
   const [selectedApp, setSelectedApp] = useState<MyBenefitApp | null>(null)
+  const [claimOpen, setClaimOpen] = useState(false)
+  const [claimFor, setClaimFor] = useState<number | null>(null)
   const user = useAppStore((s) => s.user)
 
   useEffect(() => {
@@ -145,21 +149,16 @@ export default function DashboardPage() {
             title="My Transactions"
             icon={<ShoppingBag size={18} />}
             emptyLabel="No transactions yet."
-            footer={<Link to="/marketplace" className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1">See all<ArrowRight size={14} /></Link>}
+            footer={<Link to="/my-marketplace?tab=transactions" className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1">See all<ArrowRight size={14} /></Link>}
             entries={txs.map((t) => ({ id: t.id, primary: t.transaction_type, status: t.status, extra: { as: t.as } }))}
             renderAction={(e) => (
               e.status === 'pending' && e.extra?.as === 'seller' ? (
-                <button
+                <Link
+                  to="/my-marketplace?tab=transactions"
                   className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
-                  onClick={async () => {
-                    try {
-                      await marketplaceApi.acceptTransaction(Number(e.id))
-                      setTxs((prev) => prev.map((t) => (t.id === e.id ? { ...t, status: 'accepted' } : t)))
-                    } catch {}
-                  }}
                 >
                   Accept
-                </button>
+                </Link>
               ) : null
             )}
           />
@@ -168,8 +167,19 @@ export default function DashboardPage() {
             title="My Document Requests"
             icon={<FileText size={18} />}
             emptyLabel="No requests yet."
-            footer={<Link to="/documents" className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1">Open documents<ArrowRight size={14} /></Link>}
-            entries={reqs.map((r) => ({ id: r.id, primary: r.document_type?.name || r.request_number, status: r.status, href: `/dashboard/requests/${r.id}` }))}
+            footer={<Link to="/documents?tab=requests" className="text-sm text-blue-700 hover:underline inline-flex items-center gap-1">Open documents<ArrowRight size={14} /></Link>}
+            entries={reqs.map((r: any) => ({ id: r.id, primary: `${r.document_type?.name || 'Document'} • ${r.request_number || ''}`.trim(), status: r.status, href: `/dashboard/requests/${r.id}`, extra: r }))}
+            renderAction={(e) => {
+              const extra = (e as any).extra || {}
+              const isReadyPickup = String(extra.status || '').toLowerCase() === 'ready' && String(extra.delivery_method || '').toLowerCase() !== 'digital'
+              if (!isReadyPickup) return null
+              return (
+                <button
+                  className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                  onClick={() => { setClaimFor(Number(extra.id)); setClaimOpen(true) }}
+                >View Claim Ticket</button>
+              )
+            }}
           />
 
           <ListCard
@@ -227,6 +237,9 @@ export default function DashboardPage() {
             </div>
           )}
         </Modal>
+
+      {/* Claim Ticket Modal */}
+      <ClaimTicketModal requestId={claimFor} isOpen={claimOpen} onClose={() => { setClaimOpen(false); setClaimFor(null) }} />
     </div>
   )
 }
@@ -273,15 +286,25 @@ function ListCard({ title, icon, entries, emptyLabel, footer, renderAction }: Li
       </div>
       <div className="space-y-2">
         {entries.map((e, idx) => (
-          <div key={`${String(e.id)}-${idx}`} className="flex items-center gap-3 justify-between rounded-lg border px-3 py-2">
-            <div className="min-w-0 flex-1">
+          <div
+            key={`${String(e.id)}-${idx}`}
+            className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-1 sm:gap-3 rounded-lg border px-3 py-2 items-center"
+          >
+            <div className="min-w-0">
               {e.href ? (
-                <Link to={e.href} className="truncate font-medium capitalize text-blue-700 hover:underline">{e.primary}</Link>
+                <Link
+                  to={e.href}
+                  className="block font-medium capitalize break-words line-clamp-2 sm:line-clamp-1 text-blue-700 hover:underline"
+                >
+                  {e.primary}
+                </Link>
               ) : (
-                <div className="truncate font-medium capitalize">{e.primary}</div>
+                <div className="block font-medium capitalize break-words line-clamp-2 sm:line-clamp-1">
+                  {e.primary}
+                </div>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 sm:justify-end shrink-0">
               <StatusBadge status={e.status} />
               {renderAction ? renderAction(e) : null}
             </div>
@@ -299,15 +322,5 @@ function ListCard({ title, icon, entries, emptyLabel, footer, renderAction }: Li
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const normalized = (status || '').toLowerCase()
-  const color =
-    normalized.includes('pending') ? 'bg-amber-50 text-amber-700 ring-amber-200' :
-    normalized.includes('approved') || normalized.includes('success') || normalized.includes('completed') ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' :
-    normalized.includes('rejected') || normalized.includes('cancel') || normalized.includes('failed') ? 'bg-rose-50 text-rose-700 ring-rose-200' :
-    'bg-gray-100 text-gray-700 ring-gray-200'
-  return (
-    <span className={`px-2.5 py-1 text-xs rounded-full ring-1 ${color} whitespace-nowrap capitalize`}>{status}</span>
-  )
-}
+// Using shared StatusBadge from @munlink/ui
 

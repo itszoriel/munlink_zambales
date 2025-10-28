@@ -14,7 +14,8 @@ type Item = {
   municipality_id?: number
 }
 
-const CATEGORIES = ['All', 'Electronics', 'Furniture', 'Clothing', 'Books', 'Others']
+const CATEGORIES = ['All', 'Electronics','Furniture','Clothing','Home & Garden','Vehicles','Services','Other']
+const UPLOAD_CATEGORIES = ['Electronics','Furniture','Clothing','Home & Garden','Vehicles','Services','Other']
 const TYPES = ['All', 'donate', 'lend', 'sell'] as const
 
 export default function MarketplacePage() {
@@ -76,7 +77,7 @@ export default function MarketplacePage() {
   return (
     <div className="container-responsive py-12">
       <div className="flex flex-col xs:flex-row xs:justify-between xs:items-center gap-3 mb-8">
-        <h1 className="text-3xl font-bold">Marketplace</h1>
+        <h1 className="text-fluid-3xl font-serif font-semibold">Marketplace</h1>
         <div className="w-full xs:w-auto min-w-[140px]">
           <GatedAction
             required="fullyVerified"
@@ -129,7 +130,7 @@ export default function MarketplacePage() {
             <div key={item.id} className="card">
               <div className="w-full aspect-[4/3] bg-gray-200 rounded-lg mb-4 overflow-hidden relative">
                 {item.images?.[0] && (
-                  <img src={mediaUrl(item.images[0])} alt={item.title} className="responsive-img h-full" />
+                  <img src={mediaUrl(item.images[0])} alt={item.title} loading="lazy" className="responsive-img h-full" />
                 )}
                 <div className="absolute top-3 left-3 flex items-center gap-2">
                   <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-white/90 text-neutral-800 shadow">{(item as any).municipality_name || (selectedMunicipality as any)?.name || 'Province-wide'}</span>
@@ -217,8 +218,8 @@ export default function MarketplacePage() {
       )}
 
       {open && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg w-full max-w-2xl p-6">
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false) }}>
+          <div className="bg-white rounded-lg w-full max-w-2xl p-6" tabIndex={-1} autoFocus>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Post an Item</h2>
               <button onClick={() => setOpen(false)} className="text-neutral-500 hover:text-neutral-700" aria-label="Close">
@@ -232,7 +233,12 @@ export default function MarketplacePage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Category</label>
-                <input className="input-field" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g., Electronics" />
+                <select className="input-field" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                  <option value="">Select category</option>
+                  {UPLOAD_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Condition</label>
@@ -257,8 +263,8 @@ export default function MarketplacePage() {
                 <textarea className="input-field" rows={4} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
               <div className="sm:col-span-2">
-                <label className="block text-sm font-medium mb-1">Images (max 5)</label>
-                <input type="file" accept="image/*" multiple onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0,5))} />
+                <label htmlFor="post-images" className="block text-sm font-medium mb-1">Images (max 5)</label>
+                <input id="post-images" name="post_images" className="input-field" type="file" accept="image/*" multiple onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0,5))} />
               </div>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">

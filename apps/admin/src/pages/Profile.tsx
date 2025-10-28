@@ -7,7 +7,7 @@ export default function Profile() {
   const updateUser = useAdminStore((s) => s.updateUser)
   const [user, setUser] = useState<any>(storeUser)
   const [form, setForm] = useState<{ first_name: string; middle_name?: string; last_name: string; phone_number?: string }>(
-    { first_name: storeUser?.first_name || '', middle_name: storeUser?.middle_name || '', last_name: storeUser?.last_name || '', phone_number: storeUser?.phone_number || '' }
+    { first_name: storeUser?.first_name || '', middle_name: storeUser?.middle_name || '', last_name: storeUser?.last_name || '', phone_number: (storeUser as any)?.phone_number || '' }
   )
   const [file, setFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
@@ -19,7 +19,7 @@ export default function Profile() {
         const res = await authApi.getProfile()
         const u = (res as any)?.data || res
         setUser(u)
-        setForm({ first_name: u.first_name || '', middle_name: u.middle_name || '', last_name: u.last_name || '', phone_number: u.phone_number || '' })
+        setForm({ first_name: u.first_name || '', middle_name: u.middle_name || '', last_name: u.last_name || '', phone_number: (u as any).phone_number || '' })
         updateUser(u)
       } catch {}
     })()

@@ -17,7 +17,7 @@ export default function Hero({ backgroundUrl, title, subtitle }: Props) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="text-white text-3xl md:text-5xl font-serif font-semibold drop-shadow"
+            className="text-white text-fluid-6xl font-serif font-semibold drop-shadow"
           >
             {title}
           </motion.h1>
@@ -26,7 +26,7 @@ export default function Hero({ backgroundUrl, title, subtitle }: Props) {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.1 }}
-              className="text-white/90 mt-4 max-w-2xl"
+              className="text-white/90 mt-4 max-w-3xl text-fluid-xl"
             >
               {subtitle}
             </motion.p>

@@ -1,8 +1,8 @@
+import { StatusBadge } from '@munlink/ui'
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
 import { documentsApi, mediaUrl } from '@/lib/api'
-import StatusBadge from '@/components/ui/StatusBadge'
 
 export default function DocumentRequestPage() {
   const { id } = useParams()

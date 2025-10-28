@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
+import { User, Globe } from 'lucide-react'
 import { useAdminStore } from '../../lib/store'
 
 interface TopHeaderProps {
@@ -28,6 +29,20 @@ export default function TopHeader({ sidebarCollapsed, onOpenMobile }: TopHeaderP
   }
   
   const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000'
+  // Resolve public site URL: prefer explicit env; otherwise, if running on a dev port (e.g., 3001), link to 3000
+  const PUBLIC_SITE_URL = (import.meta as any).env?.VITE_PUBLIC_SITE_URL || (() => {
+    try {
+      const { protocol, hostname, port } = window.location
+      const n = Number(port)
+      if (!Number.isNaN(n) && n > 0) {
+        const guess = n >= 3001 ? String(n - 1) : '3000'
+        return `${protocol}//${hostname}:${guess}`
+      }
+      return `${protocol}//${hostname}`
+    } catch {
+      return '/'
+    }
+  })()
   const resolveImageUrl = (path?: string) => {
     if (!path) return undefined
     if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:') || path.startsWith('blob:')) return path
@@ -44,10 +59,11 @@ export default function TopHeader({ sidebarCollapsed, onOpenMobile }: TopHeaderP
   const goToProfile = () => {
     navigate('/profile')
   }
-  const leftClassMd = sidebarCollapsed ? 'md:left-[80px]' : 'md:left-[260px]'
+  // On tablet (md–lg), always align to pinned rail (80px). On xl+, respect collapse state.
+  const leftOffset = sidebarCollapsed ? 'md:left-[80px] xl:left-[80px]' : 'md:left-[80px] xl:left-[260px]'
   const portalTitle = `${user?.admin_municipality_name || 'Municipality'} Admin Portal`
   return (
-    <header className={`fixed top-0 right-0 left-0 ${leftClassMd} h-16 bg-white md:bg-white/90 md:backdrop-blur-xl border-b border-neutral-200 z-40 transition-all duration-300`}>
+    <header className={`fixed top-0 right-0 left-0 ${leftOffset} h-16 bg-white md:bg-white/90 md:backdrop-blur-xl border-b border-neutral-200 z-40 transition-all duration-300`}>
       <div className="h-full px-4 md:px-6 flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm">
           <button className="md:hidden w-9 h-9 bg-neutral-100 hover:bg-neutral-200 rounded-lg flex items-center justify-center" onClick={onOpenMobile} aria-label="Open menu">
@@ -100,8 +116,8 @@ export default function TopHeader({ sidebarCollapsed, onOpenMobile }: TopHeaderP
                 <span className="inline-block mt-2 px-2 py-1 bg-ocean-100 text-ocean-700 text-xs font-medium rounded-full">{user?.admin_municipality_name || 'Admin'}</span>
               </div>
               <div className="py-2">
-                <button onClick={goToProfile} className="w-full text-left flex items-center gap-3 px-4 py-2 hover:bg-neutral-50 transition-colors"><span className="text-lg">👤</span><span className="text-sm font-medium text-neutral-700">My Profile</span></button>
-                <a href="/" target="_blank" className="flex items-center gap-3 px-4 py-2 hover:bg-neutral-50 transition-colors"><span className="text-lg">🌐</span><span className="text-sm font-medium text-neutral-700">View Public Site</span></a>
+                <button onClick={goToProfile} className="w-full text-left flex items-center gap-3 px-4 py-2 hover:bg-neutral-50 transition-colors"><User className="w-4 h-4" aria-hidden="true" /><span className="text-sm font-medium text-neutral-700">My Profile</span></button>
+                <a href={PUBLIC_SITE_URL} target="_blank" className="flex items-center gap-3 px-4 py-2 hover:bg-neutral-50 transition-colors"><Globe className="w-4 h-4" aria-hidden="true" /><span className="text-sm font-medium text-neutral-700">View Public Site</span></a>
               </div>
               <div className="px-4 py-3 border-t border-neutral-200">
                 <button onClick={handleLogout} className="w-full btn bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-medium">
@@ -131,8 +147,8 @@ export default function TopHeader({ sidebarCollapsed, onOpenMobile }: TopHeaderP
             </div>
           </div>
           <div className="py-2 flex-1">
-            <button onClick={() => { setMobileMenuOpen(false); goToProfile(); }} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-50 transition-colors"><span className="text-lg">👤</span><span className="text-sm font-medium text-neutral-700">My Profile</span></button>
-            <a href="/" target="_blank" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-50 transition-colors"><span className="text-lg">🌐</span><span className="text-sm font-medium text-neutral-700">View Public Site</span></a>
+            <button onClick={() => { setMobileMenuOpen(false); goToProfile(); }} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-50 transition-colors"><User className="w-4 h-4" aria-hidden="true" /><span className="text-sm font-medium text-neutral-700">My Profile</span></button>
+            <a href="/" target="_blank" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-50 transition-colors"><Globe className="w-4 h-4" aria-hidden="true" /><span className="text-sm font-medium text-neutral-700">View Public Site</span></a>
           </div>
           <div className="p-4 border-t border-neutral-200">
             <button onClick={() => { setMobileMenuOpen(false); handleLogout(); }} className="w-full btn bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-medium">Logout</button>

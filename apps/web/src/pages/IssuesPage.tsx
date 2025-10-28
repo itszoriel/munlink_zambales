@@ -1,9 +1,9 @@
+import { StatusBadge, Card, EmptyState } from '@munlink/ui'
 import { useEffect, useMemo, useState } from 'react'
 import GatedAction from '@/components/GatedAction'
 import { useAppStore } from '@/lib/store'
 import { issuesApi, mediaUrl, showToast } from '@/lib/api'
 import Modal from '@/components/ui/Modal'
-import StatusBadge from '@/components/ui/StatusBadge'
 import FileUploader from '@/components/ui/FileUploader'
 
 type Issue = {
@@ -40,6 +40,7 @@ export default function IssuesPage() {
   const [tab, setTab] = useState<'all' | 'mine'>('all')
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(1)
+  const [openId, setOpenId] = useState<string | number | null>(null)
   const isMismatch = !!(user as any)?.municipality_id && !!selectedMunicipality?.id && (user as any).municipality_id !== selectedMunicipality.id
 
   useEffect(() => {
@@ -79,26 +80,9 @@ export default function IssuesPage() {
   }, [issues, statusFilter])
 
   return (
-    <div className="container mx-auto px-4 py-12">
-      <div className="flex items-center justify-between gap-4 mb-6">
-        <h1 className="text-3xl font-serif font-semibold">Community Issues</h1>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600">Status</label>
-          <select className="input-field" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="all">All</option>
-            <option value="submitted">Submitted</option>
-            <option value="under_review">Under Review</option>
-            <option value="in_progress">In Progress</option>
-            <option value="resolved">Resolved</option>
-            <option value="closed">Closed</option>
-            <option value="rejected">Rejected</option>
-          </select>
-          <label className="text-sm text-gray-600">Category</label>
-          <select className="input-field" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-            <option value="all">All</option>
-            {categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-          </select>
-        </div>
+    <div className="container-responsive py-12">
+      <div className="mb-3">
+        <h1 className="text-fluid-3xl font-serif font-semibold">Community Issues</h1>
       </div>
 
       {isMismatch && (
@@ -107,57 +91,94 @@ export default function IssuesPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-lg border p-4 mb-6">
-        <p className="mb-4">Browse reported community issues. Viewing is open to everyone. To file a new report, create an account and get verified.</p>
-        <div className="mb-3 flex items-center gap-2">
-          <button className={`btn ${tab==='all'?'btn-primary':'btn-secondary'}`} onClick={() => setTab('all')}>All Issues</button>
-          <button className={`btn ${tab==='mine'?'btn-primary':'btn-secondary'}`} onClick={() => setTab('mine')}>My Reports</button>
+      <Card className="mb-6">
+        <div className="flex flex-col gap-3">
+          <p>Browse reported community issues. Viewing is open to everyone. To file a new report, create an account and get verified.</p>
+          <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600">Status</label>
+              <select className="input-field" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="all">All</option>
+                <option value="submitted">Submitted</option>
+                <option value="under_review">Under Review</option>
+                <option value="in_progress">In Progress</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600">Category</label>
+              <select className="input-field" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option value="all">All</option>
+                {categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+              </select>
+            </div>
+            <div className="md:ml-auto flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                <button className={`btn ${tab==='all'?'btn-primary':'btn-secondary'}`} onClick={() => setTab('all')}>All Issues</button>
+                <button className={`btn ${tab==='mine'?'btn-primary':'btn-secondary'}`} onClick={() => setTab('mine')}>My Reports</button>
+              </div>
+              <GatedAction
+                required="fullyVerified"
+                onAllowed={() => {
+                  if (isMismatch) { alert('Reporting is limited to your registered municipality'); return }
+                  setOpen(true)
+                }}
+                tooltip="Login required to use this feature"
+              >
+                <button className="btn btn-primary" disabled={isMismatch} title={isMismatch ? 'Reporting is limited to your municipality' : undefined}>Report an Issue</button>
+              </GatedAction>
+            </div>
+          </div>
         </div>
-        <GatedAction
-          required="fullyVerified"
-          onAllowed={() => {
-            if (isMismatch) { alert('Reporting is limited to your registered municipality'); return }
-            setOpen(true)
-          }}
-          tooltip="Login required to use this feature"
-        >
-          <button className="btn-primary" disabled={isMismatch} title={isMismatch ? 'Reporting is limited to your municipality' : undefined}>Report an Issue</button>
-        </GatedAction>
-      </div>
+      </Card>
 
       {loading ? (
-        <div className="text-gray-500">Loading issues...</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="skeleton-card h-40" />
+          ))}
+        </div>
       ) : (
         <>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((i: any) => (
-            <div key={i.id} className="bg-white rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-lg font-semibold">{i.title}</h3>
-                <StatusBadge status={statusLabel[(i.status as Issue['status'])]} />
-              </div>
-              <p className="text-sm text-gray-700 mt-1 mb-2">{i.description}</p>
-              <div className="text-xs text-gray-500">{i.municipality || 'Zambales'}{i.category ? ` • ${i.category}` : ''}</div>
-              {!!(i.attachments && i.attachments.length) && (
-                <div className="mt-3 flex gap-2 overflow-x-auto">
-                  {i.attachments.slice(0,5).map((p: string, idx: number) => (
-                    <img key={idx} src={mediaUrl(p)} alt="attachment" className="h-16 w-16 object-cover rounded border" />
-                  ))}
-                </div>
-              )}
+          {filtered.length === 0 ? (
+            <EmptyState title="No issues found" description="Adjust filters or check back later." />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map((i: any) => (
+                <Card key={i.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="text-lg font-semibold">{i.title}</h3>
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={statusLabel[(i.status as Issue['status'])]} />
+                      <button className="btn-ghost text-blue-700" onClick={() => setOpenId(openId===i.id?null:i.id)} aria-expanded={openId===i.id}>{openId===i.id? 'Hide':'View details'}</button>
+                    </div>
+                  </div>
+                  <p className={`text-sm text-gray-700 mt-1 mb-2 ${openId===i.id ? '' : 'line-clamp-2'}`}>{i.description}</p>
+                  {openId===i.id && (
+                    <div className="mt-2 space-y-2">
+                      <div className="text-xs text-gray-500">{i.municipality || 'Zambales'}{i.category ? ` • ${i.category?.name || i.category}` : ''}</div>
+                      {!!(i.attachments && i.attachments.length) && (
+                        <div className="mt-2 flex gap-2 overflow-x-auto">
+                          {i.attachments.slice(0,5).map((p: string, idx: number) => (
+                            <img key={idx} src={mediaUrl(p)} alt="attachment" className="h-16 w-16 object-cover rounded border" />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              ))}
             </div>
-          ))}
-          {filtered.length === 0 && (
-            <div className="col-span-full text-center text-gray-600">No issues found for the selected filters.</div>
           )}
-        </div>
-        {tab==='all' && pages>1 && (
-          <div className="mt-6 flex items-center justify-center gap-3">
-            <button className="btn btn-secondary" disabled={page<=1} onClick={() => setPage(p => Math.max(1, p-1))}>Prev</button>
-            <div className="text-sm">Page {page} / {pages}</div>
-            <button className="btn btn-secondary" disabled={page>=pages} onClick={() => setPage(p => Math.min(pages, p+1))}>Next</button>
-          </div>
-        )}
+          {tab==='all' && pages>1 && (
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <button className="btn btn-secondary" disabled={page<=1} onClick={() => setPage(p => Math.max(1, p-1))}>Prev</button>
+              <div className="text-sm">Page {page} / {pages}</div>
+              <button className="btn btn-secondary" disabled={page>=pages} onClick={() => setPage(p => Math.min(pages, p+1))}>Next</button>
+            </div>
+          )}
         </>
       )}
       <Modal isOpen={open} onClose={() => { setOpen(false); setForm({ category_id: '', title: '', description: '' }); setCreatedId(null) }} title="Report an Issue">

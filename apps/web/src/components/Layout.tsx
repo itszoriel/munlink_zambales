@@ -1,4 +1,5 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
+import { useRef } from 'react'
 import { useEffect, useState } from 'react'
 import { useAppStore } from '@/lib/store'
 import MunicipalitySelect from './MunicipalitySelect'
@@ -6,11 +7,13 @@ import ServicesMenu from './ServicesMenu'
 import { useNavigate } from 'react-router-dom'
 import Footer from './Footer'
 import AuthStatusBanner from './AuthStatusBanner'
-import Toast from '@/components/ui/Toast'
+import { Toast } from '@munlink/ui'
 import { mediaUrl } from '@/lib/api'
 import { Menu } from 'lucide-react'
 
 export default function Layout() {
+  const accountRef = useRef<HTMLDetailsElement>(null)
+  const closeAccount = () => { try { if (accountRef.current) accountRef.current.open = false } catch {} }
   const [scrolled, setScrolled] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'warning' | 'info'; message: string } | null>(null)
@@ -86,7 +89,7 @@ export default function Layout() {
                   <Link to="/register" className="hover:text-ocean-700 transition-colors font-serif">Register</Link>
                 </>
               ) : (
-                <details className="relative group">
+                <details ref={accountRef} className="relative group">
                   <summary className="list-none cursor-pointer flex items-center gap-2">
                     {user?.profile_picture ? (
                       <img src={mediaUrl(user.profile_picture)} alt="Avatar" className="w-8 h-8 rounded-full object-cover border border-white/60" />
@@ -98,10 +101,10 @@ export default function Layout() {
                     <span className="font-serif">Account ▾</span>
                   </summary>
                   <div className="absolute right-0 mt-3 w-56 bg-white/90 backdrop-blur-xl rounded-xl shadow-2xl border border-white/50 p-2 z-50">
-                    <button onClick={() => navigate('/dashboard')} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Dashboard</button>
-                    <button onClick={() => navigate('/my-marketplace')} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">My Marketplace</button>
-                    <button onClick={() => navigate('/profile')} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Profile</button>
-                    <button onClick={() => logout()} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Logout</button>
+                    <button onClick={() => { closeAccount(); navigate('/dashboard') }} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Dashboard</button>
+                    <button onClick={() => { closeAccount(); navigate('/my-marketplace') }} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">My Marketplace</button>
+                    <button onClick={() => { closeAccount(); navigate('/profile') }} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Profile</button>
+                    <button onClick={() => { closeAccount(); logout(); navigate('/login', { replace: true }) }} className="block w-full text-left px-3 py-2 rounded hover:bg-ocean-50">Logout</button>
                   </div>
                 </details>
               )}

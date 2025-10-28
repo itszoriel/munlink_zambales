@@ -22,7 +22,7 @@ export default function MarketplaceCard({ imageUrl, title, price, municipality, 
       <article>
         <div className="relative w-full aspect-[4/3] overflow-hidden">
           {imageUrl ? (
-            <img src={imageUrl} alt={title} className="h-full w-full object-cover transform transition-transform duration-300 group-hover:scale-[1.03]" />
+            <img src={imageUrl} alt={title} loading="lazy" className="h-full w-full object-cover transform transition-transform duration-300 group-hover:scale-[1.03]" />
           ) : (
             <div className="h-full w-full bg-neutral-100" />
           )}

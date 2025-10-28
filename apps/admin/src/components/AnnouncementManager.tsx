@@ -188,59 +188,35 @@ export default function AnnouncementManager({ onAnnouncementUpdated }: Announcem
       </div>
 
       {/* Announcements List */}
-      <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
         {announcements.map((announcement) => (
-          <div key={announcement.id} className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <div className="flex items-center space-x-2 mb-2">
-                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(announcement.priority)}`}>
-                    {announcement.priority.toUpperCase()}
-                  </span>
-                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${announcement.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                    {announcement.is_active ? 'ACTIVE' : 'INACTIVE'}
-                  </span>
+          <div key={announcement.id} className="bg-white rounded-2xl overflow-hidden border border-gray-200 shadow-sm hover:shadow-lg transition-shadow">
+            {/* Image banner with fixed aspect to avoid stretching on wide screens */}
+            {Array.isArray(announcement.images) && announcement.images.length > 0 ? (
+              <div className="aspect-[16/9] bg-neutral-100">
+                <img src={mediaUrl(announcement.images[0])} alt="Announcement" loading="lazy" className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className="aspect-[16/9] bg-neutral-100" />
+            )}
+            <div className="p-5">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(announcement.priority)}`}>{announcement.priority.toUpperCase()}</span>
+                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${announcement.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>{announcement.is_active ? 'ACTIVE' : 'INACTIVE'}</span>
                 </div>
-                
-                <h3 className="text-lg font-medium text-gray-900 mb-2">{announcement.title}</h3>
-                {Array.isArray(announcement.images) && announcement.images.length > 0 && (
-                  <div className="mb-3">
-                    <img src={mediaUrl(announcement.images[0])} alt="Announcement" className="w-full max-h-48 object-cover rounded border" />
-                  </div>
-                )}
-                <p className="text-gray-600 mb-3 line-clamp-3">{announcement.content}</p>
-                
-                <div className="flex items-center space-x-4 text-sm text-gray-500">
-                  {announcement.municipality_name && (
-                    <span>{announcement.municipality_name}</span>
-                  )}
-                  {announcement.creator_name && (
-                    <span>By: {announcement.creator_name}</span>
-                  )}
-                  <span>•</span>
-                  <span>{new Date(announcement.created_at).toLocaleDateString()}</span>
+                <div className="flex items-center gap-2 sm:self-start">
+                  <button onClick={() => openAnnouncementModal(announcement)} className="px-3 py-1 text-xs sm:text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors">Edit</button>
+                  <button onClick={() => handleUpdateAnnouncement(announcement.id, { is_active: !announcement.is_active })} disabled={actionLoading === announcement.id} className={`px-3 py-1 text-xs sm:text-sm font-medium rounded-md transition-colors disabled:opacity-50 ${announcement.is_active ? 'text-orange-700 bg-orange-100 hover:bg-orange-200' : 'text-green-700 bg-green-100 hover:bg-green-200'}`}>{actionLoading === announcement.id ? 'Updating…' : (announcement.is_active ? 'Deactivate' : 'Activate')}</button>
                 </div>
               </div>
-
-              <div className="flex items-center space-x-2 ml-4">
-                <button
-                  onClick={() => openAnnouncementModal(announcement)}
-                  className="px-3 py-1 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-                >
-                  Edit
-                </button>
-                
-                <button
-                  onClick={() => handleUpdateAnnouncement(announcement.id, { is_active: !announcement.is_active })}
-                  disabled={actionLoading === announcement.id}
-                  className={`px-3 py-1 text-sm font-medium rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    announcement.is_active 
-                      ? 'text-orange-700 bg-orange-100 hover:bg-orange-200' 
-                      : 'text-green-700 bg-green-100 hover:bg-green-200'
-                  }`}
-                >
-                  {actionLoading === announcement.id ? 'Updating...' : (announcement.is_active ? 'Deactivate' : 'Activate')}
-                </button>
+              <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-1 line-clamp-2">{announcement.title}</h3>
+              <p className="text-sm text-gray-600 line-clamp-3">{announcement.content}</p>
+              <div className="mt-3 flex items-center gap-3 text-xs text-gray-500">
+                {announcement.municipality_name && (<span className="truncate">{announcement.municipality_name}</span>)}
+                {announcement.creator_name && (<span className="truncate">By: {announcement.creator_name}</span>)}
+                <span className="hidden sm:inline">•</span>
+                <span>{new Date(announcement.created_at).toLocaleDateString()}</span>
               </div>
             </div>
           </div>
@@ -322,8 +298,8 @@ function AnnouncementDetailModal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[1000]">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[1000]" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto pb-24 sm:pb-0" tabIndex={-1} autoFocus>
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
@@ -354,7 +330,7 @@ function AnnouncementDetailModal({
           <div className="space-y-4">
             {/* Images */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Images</label>
+              <label htmlFor="ann-images" className="block text-sm font-medium text-gray-700 mb-1">Images</label>
               {images.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 mb-2">
                   {images.map((img, idx) => (
@@ -362,7 +338,7 @@ function AnnouncementDetailModal({
                   ))}
                 </div>
               )}
-              <input type="file" accept="image/*" onChange={async (e) => {
+              <input id="ann-images" name="announcement_images" type="file" accept="image/*" onChange={async (e) => {
                 const file = e.target.files?.[0]
                 if (!file) return
                 if (images.length >= 5) return
@@ -528,8 +504,8 @@ function CreateAnnouncementModal({ onClose, onCreate, loading }: CreateAnnouncem
   }
 
   return createPortal(
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[1000]">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[1000]" role="dialog" aria-modal="true">
+      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto pb-24 sm:pb-0" tabIndex={-1} autoFocus>
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
@@ -561,8 +537,10 @@ function CreateAnnouncementModal({ onClose, onCreate, loading }: CreateAnnouncem
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Images (optional, up to 5)</label>
+              <label htmlFor="create-ann-images" className="block text-sm font-medium text-gray-700 mb-1">Images (optional, up to 5)</label>
               <input
+                id="create-ann-images"
+                name="create_announcement_images"
                 type="file"
                 accept="image/*"
                 multiple

@@ -3,6 +3,7 @@ import { handleApiError, userApi, mediaUrl, transferAdminApi, showToast, municip
 import { useLocation } from 'react-router-dom'
 import { useAdminStore } from '../lib/store'
 import { DataTable, Modal, Button } from '@munlink/ui'
+import { X, Check, RotateCcw, Pause, ExternalLink, Hourglass } from 'lucide-react'
 
 export default function Residents() {
   const location = useLocation()
@@ -313,7 +314,7 @@ export default function Residents() {
                               onClick={(e) => { e.stopPropagation(); if (canApprove) updateTransferStatus(t.id,'rejected') }}
                               disabled={actionLoading===`t-${t.id}` || !canApprove}
                             >
-                              ✕
+                              <X className="w-4 h-4" aria-hidden="true" />
                             </button>
                             <button
                               title={canApprove ? 'Approve' : 'Only source municipality can approve'}
@@ -322,7 +323,7 @@ export default function Residents() {
                               onClick={(e) => { e.stopPropagation(); if (canApprove) updateTransferStatus(t.id,'approved') }}
                               disabled={actionLoading===`t-${t.id}` || !canApprove}
                             >
-                              ✓
+                              <Check className="w-4 h-4" aria-hidden="true" />
                             </button>
                           </>
                         )}
@@ -334,7 +335,7 @@ export default function Residents() {
                             onClick={(e) => { e.stopPropagation(); if (canAccept) updateTransferStatus(t.id,'accepted') }}
                             disabled={actionLoading===`t-${t.id}` || !canAccept}
                           >
-                            ✔
+                            <Check className="w-4 h-4" aria-hidden="true" />
                           </button>
                         )}
                       </div>
@@ -375,9 +376,10 @@ export default function Residents() {
               ) },
               { key: 'status', header: 'Status', className: 'md:col-span-3 xl:col-span-2', render: (r: any) => (
                 <div className="flex items-center h-10">
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${r.status === 'verified' ? 'bg-forest-100 text-forest-700' : r.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-                    {r.status === 'verified' && '✓ '} {r.status === 'pending' && '⏳ '}
-                    {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                  <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${r.status === 'verified' ? 'bg-forest-100 text-forest-700' : r.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+                    {r.status === 'verified' && <Check className="w-4 h-4" aria-hidden="true" />}
+                    {r.status === 'pending' && <Hourglass className="w-4 h-4" aria-hidden="true" />}
+                    <span>{r.status.charAt(0).toUpperCase() + r.status.slice(1)}</span>
                   </span>
                 </div>
               ) },
@@ -385,8 +387,12 @@ export default function Residents() {
                 <div className="flex items-center justify-end h-10 gap-1 whitespace-nowrap">
                   {r.status === 'pending' ? (
                     <>
-                      <button title="Reject" aria-label="Reject" className="icon-btn danger" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleReject(e as any, r) }} disabled={actionLoading === String(r.id)}>✕</button>
-                      <button title="Approve" aria-label="Approve" className="icon-btn primary" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleApprove(e as any, r) }} disabled={actionLoading === String(r.id)}>✓</button>
+                      <button title="Reject" aria-label="Reject" className="icon-btn danger" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleReject(e as any, r) }} disabled={actionLoading === String(r.id)}>
+                        <X className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                      <button title="Approve" aria-label="Approve" className="icon-btn primary" onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleApprove(e as any, r) }} disabled={actionLoading === String(r.id)}>
+                        <Check className="w-4 h-4" aria-hidden="true" />
+                      </button>
                     </>
                   ) : (
                     <>
@@ -411,9 +417,15 @@ export default function Residents() {
                         title={r.status==='suspended' ? 'Unsuspend' : 'Suspend'}
                         aria-label={r.status==='suspended' ? 'Unsuspend' : 'Suspend'}
                       >
-                        {r.status==='suspended' ? '↺' : '⏸'}
+                        {r.status==='suspended' ? (
+                          <RotateCcw className="w-4 h-4" aria-hidden="true" />
+                        ) : (
+                          <Pause className="w-4 h-4" aria-hidden="true" />
+                        )}
                       </button>
-                      <button title="Open" aria-label="Open" className="icon-btn" onClick={(e: React.MouseEvent) => { e.stopPropagation(); openResident(r) }}>↗</button>
+                      <button title="Open" aria-label="Open" className="icon-btn" onClick={(e: React.MouseEvent) => { e.stopPropagation(); openResident(r) }}>
+                        <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                      </button>
                     </>
                   )}
                 </div>
@@ -540,8 +552,20 @@ function ResidentDetailModal({ userId, basic, onClose, onStatusChange }: { userI
           <p className="text-sm text-neutral-600">@{data?.username} • {data?.email}</p>
           {data?.municipality_name && (<p className="text-sm text-neutral-600">{data.municipality_name}</p>)}
           <div className="mt-2">
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${status === 'verified' ? 'bg-forest-100 text-forest-700' : status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
-              {status === 'verified' ? '✓ Verified' : status === 'pending' ? '⏳ Pending' : 'Suspended'}
+            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${status === 'verified' ? 'bg-forest-100 text-forest-700' : status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>
+              {status === 'verified' ? (
+                <>
+                  <Check className="w-4 h-4" aria-hidden="true" />
+                  <span>Verified</span>
+                </>
+              ) : status === 'pending' ? (
+                <>
+                  <Hourglass className="w-4 h-4" aria-hidden="true" />
+                  <span>Pending</span>
+                </>
+              ) : (
+                <span>Suspended</span>
+              )}
             </span>
           </div>
         </div>

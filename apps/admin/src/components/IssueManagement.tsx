@@ -2,7 +2,7 @@
  * MunLink Zambales - Issue Management Component
  * Component for managing and responding to issues
  */
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { issueApi, handleApiError } from '../lib/api'
 
 interface Issue {

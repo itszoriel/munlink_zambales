@@ -8,6 +8,11 @@ DATABASE_URL=postgresql://munlink_user:your_password@localhost:5432/munlink_zamb
 JWT_SECRET_KEY=f7d35600f9d2a1bb4bd2c5b721547c96c3bf15de1add8967dacf4590fb2ad88a15dc8346275e3ba98ea642a939a4e79f8acdd40209237127bf3b3b9360dbe85a
 JWT_ACCESS_TOKEN_EXPIRES=86400
 
+# Optional: Encryption key for pickup codes (Fernet base64 key). If not set, a
+# key will be derived from JWT_SECRET_KEY. Generate with Python:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+CLAIM_CODE_ENC_KEY=
+
 # ADMIN SECURITY
 ADMIN_SECRET_KEY=Pauljohn8265
 

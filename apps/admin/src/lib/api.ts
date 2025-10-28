@@ -438,15 +438,9 @@ export const handleApiError = (error: AxiosError): string => {
 }
 
 // Toast helper for consistent notifications
-export const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+export const showToast = (message: string, _type: 'success' | 'error' | 'info' = 'info') => {
   // Use browser alert for now - in a real app you'd use a toast library
-  if (type === 'success') {
-    alert(`✅ ${message}`)
-  } else if (type === 'error') {
-    alert(`❌ ${message}`)
-  } else {
-    alert(`ℹ️ ${message}`)
-  }
+  alert(message)
 }
 
 // Export the main API client for custom requests
@@ -466,6 +460,10 @@ export const documentsAdminApi = {
     apiClient.put(`/api/admin/documents/requests/${id}/status`, { status, admin_notes, rejection_reason }).then(res => res.data),
   updateContent: (id: number, data: { purpose?: string; remarks?: string; civil_status?: string; age?: number }): Promise<ApiResponse<{ request: any }>> =>
     apiClient.put(`/api/admin/documents/requests/${id}/content`, data).then(res => res.data),
+  readyForPickup: (id: number, window?: { window_start?: string; window_end?: string }): Promise<ApiResponse<{ claim: { qr_path: string; code_masked: string; window_start?: string; window_end?: string; token: string }, request: any }>> =>
+    apiClient.post(`/api/admin/documents/requests/${id}/ready-for-pickup`, window || {}).then(res => res.data),
+  verifyClaim: (payload: { token?: string; code?: string; request_id?: number }): Promise<ApiResponse<{ ok: boolean; request?: any }>> =>
+    apiClient.post('/api/admin/claim/verify', payload).then(res => res.data),
 }
 
 export const municipalitiesAdminApi = {

@@ -6,6 +6,8 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt, verify_jwt_in_request
 from sqlalchemy import func, and_, or_
 from datetime import datetime, timedelta
+import os
+import jwt
 from apps.api import db
 from apps.api.models.user import User
 from apps.api.models.municipality import Municipality
@@ -19,6 +21,16 @@ from apps.api.models.transfer import TransferRequest
 from apps.api.utils.file_handler import save_announcement_image
 from apps.api.utils.validators import ValidationError
 from apps.api.utils.email_sender import send_user_status_email, send_document_request_status_email
+from apps.api.utils.qr_utils import (
+    generate_pickup_code,
+    hash_code,
+    verify_code,
+    sign_claim_token,
+    build_qr_png,
+    masked,
+    encrypt_code,
+    get_municipality_slug,
+)
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
@@ -1130,6 +1142,33 @@ def admin_list_benefit_programs():
         if changed:
             db.session.commit()
 
+        # Compute beneficiaries as count of approved applications per program
+        try:
+            program_ids = [p.id for p in programs] or []
+            if program_ids:
+                rows = (
+                    db.session.query(
+                        BenefitApplication.program_id,
+                        func.count(BenefitApplication.id)
+                    )
+                    .filter(
+                        BenefitApplication.program_id.in_(program_ids),
+                        BenefitApplication.status == 'approved'
+                    )
+                    .group_by(BenefitApplication.program_id)
+                    .all()
+                )
+                counts = {pid: int(cnt) for pid, cnt in rows}
+                for p in programs:
+                    # override in-memory for response consistency
+                    try:
+                        p.current_beneficiaries = counts.get(p.id, 0)
+                    except Exception:
+                        pass
+        except Exception:
+            # Best-effort; fall back to stored value
+            pass
+
         return jsonify({
             'programs': [p.to_dict() for p in programs],
             'count': len(programs)
@@ -1304,6 +1343,15 @@ def admin_update_benefit_application_status(application_id: int):
             app.reviewed_at = now
         if new_status == 'approved':
             app.approved_at = now
+        # Adjust program beneficiaries count based on status transition
+        try:
+            if prev != 'approved' and new_status == 'approved':
+                program.current_beneficiaries = (program.current_beneficiaries or 0) + 1
+            if prev == 'approved' and new_status != 'approved':
+                current = (program.current_beneficiaries or 0)
+                program.current_beneficiaries = max(0, current - 1)
+        except Exception:
+            pass
         db.session.commit()
 
         # Email notifications (best-effort)
@@ -1667,7 +1715,7 @@ def update_document_request_status(request_id: int):
         notes = data.get('admin_notes')
         rejection_reason = data.get('rejection_reason')
 
-        if new_status not in ['pending', 'processing', 'ready', 'completed', 'rejected', 'cancelled']:
+        if new_status not in ['pending', 'processing', 'ready', 'completed', 'picked_up', 'rejected', 'cancelled']:
             return jsonify({'error': 'Invalid status'}), 400
 
         req = DocumentRequest.query.get(request_id)
@@ -1681,11 +1729,13 @@ def update_document_request_status(request_id: int):
         # Idempotent: if status is the same, no-op success
         if new_status == current:
             return jsonify({'message': 'Status unchanged', 'request': req.to_dict()}), 200
+        # Allow picked_up for physical pickup handover; completed for digital delivery
         allowed = {
             'pending': {'processing', 'rejected', 'cancelled'},
             'processing': {'ready', 'rejected', 'cancelled'},
-            'ready': {'completed', 'rejected', 'cancelled'},
+            'ready': {'completed', 'picked_up', 'rejected', 'cancelled'},
             'completed': set(),
+            'picked_up': set(),
             'rejected': set(),
             'cancelled': set(),
         }
@@ -1735,6 +1785,177 @@ def update_document_request_status(request_id: int):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to update request status', 'details': str(e)}), 500
+
+
+@admin_bp.route('/documents/requests/<int:request_id>/ready-for-pickup', methods=['POST'])
+@jwt_required()
+def admin_ready_for_pickup(request_id: int):
+    """Generate a claim ticket and mark a physical request as ready.
+
+    Reuses qr_code (PNG relative path) and qr_data (JSON payload) fields.
+    """
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        payload = request.get_json(silent=True) or {}
+        window_start = payload.get('window_start')
+        window_end = payload.get('window_end')
+
+        req = DocumentRequest.query.get(request_id)
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
+        if req.municipality_id != municipality_id:
+            return jsonify({'error': 'Request not in your municipality'}), 403
+
+        # Only for pickup/physical requests
+        if (req.delivery_method or '').lower() not in ('physical', 'pickup'):
+            return jsonify({'error': 'Only pickup requests can be marked ready-for-pickup'}), 400
+
+        # Generate code and token
+        code = generate_pickup_code()
+        code_h = hash_code(code)
+        token_info = sign_claim_token(req)
+
+        # Build QR deep link to admin portal verify page with token param
+        base = (
+            current_app.config.get('ADMIN_WEB_BASE_URL')
+            or os.getenv('ADMIN_WEB_BASE_URL')
+            or 'http://localhost:3001'
+        )
+        deep_link = f"{base}/verify-ticket?token={token_info['token']}"
+
+        # Build QR image file
+        muni_name = getattr(getattr(req, 'municipality', None), 'name', str(req.municipality_id))
+        slug = get_municipality_slug(muni_name)
+        _, rel_png = build_qr_png(deep_link, req.id, slug)
+
+        # Persist on request using existing columns
+        req.qr_code = rel_png
+        req.qr_data = {
+            'token': token_info['token'],
+            'jti': token_info['jti'],
+            'exp': token_info['exp'],
+            'code_hash': code_h.decode('utf-8', errors='ignore') if isinstance(code_h, (bytes, bytearray)) else str(code_h),
+            'code_enc': encrypt_code(code),
+            'code_masked': masked(code),
+            'window_start': window_start,
+            'window_end': window_end,
+        }
+        req.status = 'ready'
+        req.ready_at = datetime.utcnow()
+        req.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        # Best-effort notify resident via email
+        try:
+            user = User.query.get(req.user_id)
+            doc_type = DocumentType.query.get(req.document_type_id)
+            if user and getattr(user, 'email', None):
+                # Reuse existing email helper with a simple message
+                send_user_status_email(user.email, approved=True)
+        except Exception:
+            pass
+
+        return jsonify({
+            'message': 'Ready for pickup and claim ticket generated',
+            'claim': {
+                'qr_path': f"/uploads/{rel_png}",
+                'code_masked': req.qr_data.get('code_masked'),
+                'window_start': window_start,
+                'window_end': window_end,
+                'token': token_info['token'],
+            },
+            'request': req.to_dict(include_user=True)
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to set ready for pickup', 'details': str(e)}), 500
+
+
+@admin_bp.route('/claim/verify', methods=['POST'])
+@jwt_required()
+def admin_verify_claim():
+    """Verify a claim by token or fallback code.
+
+    Returns safe request details for counter display.
+    """
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        payload = request.get_json(silent=True) or {}
+        token = payload.get('token')
+        code = payload.get('code')
+
+        req = None
+        # Prefer token verification
+        if token:
+            secret = (
+                current_app.config.get('CLAIM_JWT_SECRET')
+                or current_app.config.get('JWT_SECRET_KEY')
+                or 'change-me'
+            )
+            try:
+                data = jwt.decode(token, secret, algorithms=['HS256'])
+                sub = data.get('sub') or ''
+                if sub.startswith('request:'):
+                    rid = int(sub.split(':', 1)[1])
+                    req = DocumentRequest.query.get(rid)
+            except Exception as dec_err:
+                return jsonify({'ok': False, 'error': f'Invalid token: {dec_err}'}), 400
+
+        if req is None and code:
+            # Fallback: search by request id in payload and compare code with stored hash
+            # We avoid scanning all rows; require request_id in payload when using code
+            rid = payload.get('request_id')
+            if not rid:
+                return jsonify({'ok': False, 'error': 'request_id is required with code verification'}), 400
+            req = DocumentRequest.query.get(int(rid))
+            if not req:
+                return jsonify({'ok': False, 'error': 'Request not found'}), 404
+            try:
+                qd = req.qr_data or {}
+                stored = qd.get('code_hash')
+                if not stored:
+                    return jsonify({'ok': False, 'error': 'No claim code on record'}), 400
+                stored_bytes = stored.encode('utf-8') if isinstance(stored, str) else stored
+                if not verify_code(code, stored_bytes):
+                    return jsonify({'ok': False, 'error': 'Invalid code'}), 400
+            except Exception:
+                return jsonify({'ok': False, 'error': 'Verification error'}), 400
+
+        if not req:
+            return jsonify({'ok': False, 'error': 'Verification failed'}), 400
+
+        if req.municipality_id != municipality_id:
+            return jsonify({'ok': False, 'error': 'Request not in your municipality'}), 403
+
+        # Must be ready and not yet picked up
+        status = (req.status or '').lower()
+        if status != 'ready':
+            return jsonify({'ok': False, 'error': f'Request not ready (status={status})'}), 400
+
+        user = User.query.get(req.user_id)
+        doc_type = DocumentType.query.get(req.document_type_id)
+        muni = Municipality.query.get(req.municipality_id)
+        return jsonify({
+            'ok': True,
+            'request': {
+                'id': req.id,
+                'request_number': req.request_number,
+                'status': req.status,
+                'document': doc_type.name if doc_type else None,
+                'resident': (f"{getattr(user, 'first_name', '')} {getattr(user, 'last_name', '')}").strip() or getattr(user, 'username', 'Resident') if user else 'Resident',
+            },
+            'municipality': getattr(muni, 'name', None),
+            'window_start': (req.qr_data or {}).get('window_start'),
+            'window_end': (req.qr_data or {}).get('window_end'),
+        }), 200
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 @admin_bp.route('/documents/requests/<int:request_id>/content', methods=['PUT'])

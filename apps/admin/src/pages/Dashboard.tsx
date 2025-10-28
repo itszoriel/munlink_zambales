@@ -4,6 +4,7 @@ import UserVerificationList from '../components/UserVerificationList'
 import { useNavigate } from 'react-router-dom'
 import { useAdminStore } from '../lib/store'
 import { StatCard, Card, Button, Select } from '@munlink/ui'
+import { Hand, Users, AlertTriangle, ShoppingBag, Megaphone } from 'lucide-react'
 
 export default function Dashboard() {
   const user = useAdminStore((s) => s.user)
@@ -18,6 +19,7 @@ export default function Dashboard() {
     { label: 'Marketplace', value: 0, max: 50, color: 'sunset' },
     { label: 'Issues', value: 0, max: 50, color: 'red' },
   ])
+  const [recentAnnouncements, setRecentAnnouncements] = useState<any[]>([])
 
   // Quick actions removed per design update
 
@@ -62,17 +64,36 @@ export default function Dashboard() {
   // Load recent activity and overview series
   const loadActivity = async () => {
     try {
-      const [pendingUsersRes, issuesRes, itemsRes, announcementsRes] = await Promise.allSettled([
+      const [pendingUsersRes, issuesRes, itemsRes, announcementsRes, marketStatsRes] = await Promise.allSettled([
         userApi.getPendingUsers(),
         issueApi.getIssues({ page: 1, per_page: 20 }),
         marketplaceApi.getPendingItems(),
         announcementApi.getAnnouncements(),
+        marketplaceApi.getMarketplaceStats(),
       ])
 
       const pendingUsers = pendingUsersRes.status === 'fulfilled' ? ((pendingUsersRes.value as any)?.data?.users || (pendingUsersRes.value as any)?.users || []) : []
       const issues = issuesRes.status === 'fulfilled' ? ((issuesRes.value as any)?.data?.data || (issuesRes.value as any)?.data || (issuesRes.value as any)?.issues || []) : []
       const items = itemsRes.status === 'fulfilled' ? (((itemsRes.value as any)?.data?.data?.items) || (itemsRes.value as any)?.data?.items || (itemsRes.value as any)?.items || []) : []
       const announcements = announcementsRes.status === 'fulfilled' ? (((announcementsRes.value as any)?.data?.announcements) || (announcementsRes.value as any)?.announcements || []) : []
+      setRecentAnnouncements(announcements.slice(0, 3))
+
+      // Update top-level counts as a fallback if dashboard stats are zero/missing
+      const marketStats = marketStatsRes.status === 'fulfilled' ? ((marketStatsRes.value as any)?.data || marketStatsRes.value) : undefined
+      const totalMarket = marketStats?.total_items ?? marketStats?.approved_items ?? items.length
+      const pendingCount = Array.isArray(pendingUsers) ? pendingUsers.length : 0
+      const activeIssuesCount = Array.isArray(issues)
+        ? issues.filter((it: any) => {
+            const s = String(it.status || it.state || '').toLowerCase()
+            return s.includes('active') || s.includes('in_progress') || s.includes('under') || s === ''
+          }).length
+        : 0
+      setDash((prev) => ({
+        pending_verifications: pendingCount || prev?.pending_verifications || 0,
+        active_issues: activeIssuesCount || prev?.active_issues || 0,
+        marketplace_items: typeof totalMarket === 'number' ? totalMarket : (prev?.marketplace_items ?? 0),
+        announcements: announcements.length || prev?.announcements || 0,
+      }))
 
       // Build feed
       const feed: Array<{ icon: string; text: string; who?: string; ts: number; color: 'ocean'|'forest'|'sunset'|'purple'|'red' }> = []
@@ -143,6 +164,14 @@ export default function Dashboard() {
 
   const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
+  function IconFromCode({ code, className }: { code: string; className?: string }) {
+    if (code === '👥') return <Users className={className || 'w-5 h-5'} aria-hidden="true" />
+    if (code === '⚠️') return <AlertTriangle className={className || 'w-5 h-5'} aria-hidden="true" />
+    if (code === '🛍️') return <ShoppingBag className={className || 'w-5 h-5'} aria-hidden="true" />
+    if (code === '📢') return <Megaphone className={className || 'w-5 h-5'} aria-hidden="true" />
+    return <Users className={className || 'w-5 h-5'} aria-hidden="true" />
+  }
+
   return (
     <div className="min-h-screen">
       <div className="pt-0">
@@ -156,7 +185,7 @@ export default function Dashboard() {
             <div className="absolute bottom-0 left-0 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
             <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="min-w-0">
-                <h1 className="text-3xl font-bold mb-2">Welcome back, {user?.first_name}! 👋</h1>
+                <h1 className="text-3xl font-bold mb-2 inline-flex items-center gap-2">Welcome back, {user?.first_name}! <Hand className="w-6 h-6" aria-hidden="true" /></h1>
                 <p className="text-ocean-100 text-lg">{user?.admin_municipality_name || 'Admin'} Dashboard • {dateStr}</p>
               </div>
               <div className="flex flex-col xs:flex-row gap-3 w-full sm:w-auto"></div>
@@ -185,11 +214,26 @@ export default function Dashboard() {
             {/* Right - Announcements */}
             <Card title={<span className="text-xl font-bold">Announcements</span>} subtitle="Create and manage public announcements">
               <Button fullWidth className="mb-6" onClick={() => navigate('/announcements')}>+ Create Announcement</Button>
-              <div className="text-center py-8">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-neutral-100 rounded-2xl mb-4"><span className="text-3xl">📢</span></div>
-                <h3 className="font-bold text-neutral-900 mb-2">No announcements</h3>
-                <p className="text-sm text-neutral-600">Create your first announcement to get started.</p>
-              </div>
+              {recentAnnouncements.length > 0 ? (
+                <div className="space-y-3">
+                  {recentAnnouncements.map((a, i) => (
+                    <div key={`${a.id}-${i}`} className="p-3 rounded-xl border bg-white/80 backdrop-blur">
+                      <div className="text-sm font-medium truncate">{a.title}</div>
+                      <div className="text-xs text-neutral-600 truncate">{(a.content || '').slice(0, 120)}</div>
+                      <div className="text-xs text-neutral-500 mt-1">{(a.created_at || '').slice(0,10)}</div>
+                    </div>
+                  ))}
+                  <Button variant="secondary" fullWidth onClick={() => navigate('/announcements')}>View All</Button>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="inline-flex items-center justify-center w-16 h-16 bg-neutral-100 rounded-2xl mb-4">
+                    <Megaphone className="w-8 h-8" aria-hidden="true" />
+                  </div>
+                  <h3 className="font-bold text-neutral-900 mb-2">No announcements</h3>
+                  <p className="text-sm text-neutral-600">Create your first announcement to get started.</p>
+                </div>
+              )}
             </Card>
           </div>
 
@@ -200,7 +244,9 @@ export default function Dashboard() {
               <div className="space-y-4">
                 {activity.map((a, i) => (
                   <div key={i} className="flex items-start gap-3 p-3 bg-neutral-50 rounded-xl hover:bg-neutral-100 transition-colors">
-                    <div className={`w-10 h-10 bg-${a.color}-100 rounded-lg flex items-center justify-center text-lg flex-shrink-0`}>{a.icon}</div>
+                    <div className={`w-10 h-10 bg-${a.color}-100 rounded-lg flex items-center justify-center text-lg flex-shrink-0`}>
+                      <IconFromCode code={a.icon} className="w-5 h-5" />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-neutral-900 font-medium mb-1">{a.text}</p>
                       <p className="text-xs text-neutral-600">{a.who || 'System'} • {timeAgo(a.ts)}</p>
@@ -215,7 +261,7 @@ export default function Dashboard() {
 
             {/* Activity Overview */}
             <Card title={<span className="text-xl font-bold">Activity Overview</span>} actions={(
-              <Select name="activityRange" aria-label="Select activity date range" className="px-3 py-1.5" onChange={(e)=>{ /* no-op placeholder; data already polls */ }}>
+              <Select name="activityRange" aria-label="Select activity date range" className="px-3 py-1.5" onChange={(_e)=>{ /* no-op placeholder; data already polls */ }}>
                 <option>Last 7 days</option>
                 <option>Last 30 days</option>
                 <option>Last 90 days</option>

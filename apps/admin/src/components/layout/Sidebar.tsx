@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useAdminStore } from '../../lib/store'
+import { LayoutDashboard, Users, Gift, FileText, AlertTriangle, ShoppingBag, Megaphone, BarChart3 } from 'lucide-react'
 
 interface SidebarProps {
   collapsed: boolean
@@ -8,15 +9,30 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { icon: '📊', label: 'Dashboard', path: '/dashboard', badge: null },
-  { icon: '👥', label: 'Residents', path: '/residents', badge: null },
-  { icon: '🎁', label: 'Benefits', path: '/benefits', badge: null },
-  { icon: '📄', label: 'Requests', path: '/requests', badge: null },
-  { icon: '⚠️', label: 'Issues', path: '/issues', badge: null },
-  { icon: '🛍️', label: 'Marketplace', path: '/marketplace', badge: null },
-  { icon: '📢', label: 'Announcements', path: '/announcements', badge: null },
-  { icon: '📈', label: 'Reports', path: '/reports', badge: null },
+  { icon: 'dashboard', label: 'Dashboard', path: '/dashboard', badge: null },
+  { icon: 'residents', label: 'Residents', path: '/residents', badge: null },
+  { icon: 'benefits', label: 'Benefits', path: '/benefits', badge: null },
+  { icon: 'requests', label: 'Requests', path: '/requests', badge: null },
+  { icon: 'requests', label: 'Verify Ticket', path: '/verify-ticket', badge: null },
+  { icon: 'issues', label: 'Issues', path: '/issues', badge: null },
+  { icon: 'marketplace', label: 'Marketplace', path: '/marketplace', badge: null },
+  { icon: 'announcements', label: 'Announcements', path: '/announcements', badge: null },
+  { icon: 'reports', label: 'Reports', path: '/reports', badge: null },
 ]
+
+function IconFor(code: string, className = 'w-5 h-5') {
+  switch (code) {
+    case 'dashboard': return <LayoutDashboard className={className} aria-hidden="true" />
+    case 'residents': return <Users className={className} aria-hidden="true" />
+    case 'benefits': return <Gift className={className} aria-hidden="true" />
+    case 'requests': return <FileText className={className} aria-hidden="true" />
+    case 'issues': return <AlertTriangle className={className} aria-hidden="true" />
+    case 'marketplace': return <ShoppingBag className={className} aria-hidden="true" />
+    case 'announcements': return <Megaphone className={className} aria-hidden="true" />
+    case 'reports': return <BarChart3 className={className} aria-hidden="true" />
+    default: return <LayoutDashboard className={className} aria-hidden="true" />
+  }
+}
 
 export default function Sidebar({ collapsed, onToggle, className = '' }: SidebarProps) {
   const user = useAdminStore((s) => s.user)
@@ -79,7 +95,7 @@ export default function Sidebar({ collapsed, onToggle, className = '' }: Sidebar
                 to={item.path}
                 className={({ isActive }) => `flex items-center justify-center w-12 h-12 rounded-xl transition-all ${isActive ? 'bg-ocean-gradient text-white shadow-lg' : 'text-neutral-700 hover:bg-ocean-50'}`}
               >
-                <span className="text-xl">{item.icon}</span>
+                <span className="text-xl">{IconFor(item.icon, 'w-5 h-5')}</span>
                 {item.badge && (
                   <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
                     {item.badge}
@@ -122,7 +138,7 @@ export default function Sidebar({ collapsed, onToggle, className = '' }: Sidebar
             className={({ isActive }) => `group flex items-center justify-between px-4 py-3 rounded-xl font-medium transition-all ${isActive ? 'bg-ocean-gradient text-white shadow-lg' : 'text-neutral-700 hover:bg-ocean-50 hover:text-ocean-700'}`}
           >
             <div className="flex items-center gap-3">
-              <span className="text-xl">{item.icon}</span>
+              <span className="text-xl">{IconFor(item.icon, 'w-5 h-5')}</span>
               <span className="text-sm">{item.label}</span>
             </div>
             {item.badge && (

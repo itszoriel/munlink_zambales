@@ -140,10 +140,14 @@ class Transaction(db.Model):
     borrow_start_date = db.Column(db.DateTime, nullable=True)
     borrow_end_date = db.Column(db.DateTime, nullable=True)
     return_date = db.Column(db.DateTime, nullable=True)
+    # Scheduled pickup (set by seller upon acceptance)
+    pickup_at = db.Column(db.DateTime, nullable=True)
     
     # Notes
     buyer_notes = db.Column(db.Text, nullable=True)
     seller_notes = db.Column(db.Text, nullable=True)
+    # Proposed pickup location (seller sets during proposal/acceptance)
+    pickup_location = db.Column(db.String(200), nullable=True)
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -177,6 +181,8 @@ class Transaction(db.Model):
             'borrow_start_date': self.borrow_start_date.isoformat() if self.borrow_start_date else None,
             'borrow_end_date': self.borrow_end_date.isoformat() if self.borrow_end_date else None,
             'return_date': self.return_date.isoformat() if self.return_date else None,
+            'pickup_at': self.pickup_at.isoformat() if self.pickup_at else None,
+            'pickup_location': self.pickup_location,
             'buyer_notes': self.buyer_notes,
             'seller_notes': self.seller_notes,
             'created_at': self.created_at.isoformat() if self.created_at else None,

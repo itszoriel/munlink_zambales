@@ -62,6 +62,30 @@ def list_programs():
             db.session.commit()
             # Filter out programs that were just set inactive
             programs = [p for p in programs if p.is_active]
+        # Compute beneficiaries as count of approved applications per program (public view)
+        try:
+            ids = [p.id for p in programs] or []
+            if ids:
+                rows = (
+                    db.session.query(
+                        BenefitApplication.program_id,
+                        db.func.count(BenefitApplication.id)
+                    )
+                    .filter(
+                        BenefitApplication.program_id.in_(ids),
+                        BenefitApplication.status == 'approved'
+                    )
+                    .group_by(BenefitApplication.program_id)
+                    .all()
+                )
+                counts = {pid: int(cnt) for pid, cnt in rows}
+                for p in programs:
+                    try:
+                        p.current_beneficiaries = counts.get(p.id, 0)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         return jsonify({'programs': [p.to_dict() for p in programs], 'count': len(programs)}), 200
     except Exception as e:

@@ -3,6 +3,7 @@ import qrcode
 import json
 import os
 from datetime import datetime
+from flask import current_app
 from io import BytesIO
 import base64
 
@@ -14,7 +15,12 @@ def generate_qr_code_data(document_request):
     Returns a simple URL string that can be scanned and opened directly.
     Format: http://localhost:5000/verify/REQ-2024-001
     """
-    base_url = os.getenv('BASE_URL', 'http://localhost:5000')
+    base_url = (
+        os.getenv('VERIFICATION_BASE_URL')
+        or os.getenv('WEB_BASE_URL')
+        or (current_app.config.get('WEB_BASE_URL') if current_app else None)
+        or 'http://localhost:5173'
+    )
     # Return simple URL string, not JSON object
     return f"{base_url}/verify/{document_request.request_number}"
 

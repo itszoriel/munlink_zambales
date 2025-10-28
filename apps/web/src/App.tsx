@@ -11,6 +11,7 @@ import DocumentsPage from './pages/DocumentsPage'
 import DocumentRequestPage from './pages/DocumentRequestPage'
 import IssuesPage from './pages/IssuesPage'
 import BenefitsPage from './pages/BenefitsPage'
+import VerifyDocumentPage from './pages/VerifyDocumentPage'
 import ProtectedRoute from './components/ProtectedRoute'
 import VerifyEmailPage from './pages/VerifyEmailPage'
 import UploadIdPage from './pages/UploadIdPage'
@@ -39,6 +40,7 @@ function App() {
           <Route path="dashboard/requests/:id" element={<ProtectedRoute allow={["resident"]}><DocumentRequestPage /></ProtectedRoute>} />
           <Route path="issues" element={<ProtectedRoute allow={["resident","admin","public"]}><IssuesPage /></ProtectedRoute>} />
           <Route path="benefits" element={<ProtectedRoute allow={["resident","admin","public"]}><BenefitsPage /></ProtectedRoute>} />
+          <Route path="verify/:requestNumber" element={<VerifyDocumentPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

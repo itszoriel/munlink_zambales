@@ -1,8 +1,9 @@
 import { Navigate } from 'react-router-dom'
+import type { ReactElement } from 'react'
 import { useAppStore } from '@/lib/store'
 
 type Props = {
-  children: JSX.Element
+  children: ReactElement
   allow: Array<'public' | 'resident' | 'admin'>
 }
 

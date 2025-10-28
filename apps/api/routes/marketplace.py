@@ -1,7 +1,7 @@
 """Marketplace routes for items, transactions, and messages."""
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import sqlite3
 from sqlalchemy.exc import OperationalError as SAOperationalError, ProgrammingError as SAProgrammingError
 from apps.api import db
@@ -374,16 +374,16 @@ def create_transaction():
         if not user.municipality_id or int(user.municipality_id) != int(item.municipality_id):
             return jsonify({'error': 'Transactions are limited to your municipality'}), 403
 
-        # Prevent duplicate pending requests for same item
+        # Prevent duplicate pending/proposed requests for same item
         existing_pending = (
             Transaction.query
-            .filter_by(item_id=item_id, status='pending')
+            .filter(Transaction.item_id == item_id, Transaction.status.in_(['pending', 'awaiting_buyer']))
             .first()
         )
         if existing_pending:
             return jsonify({'error': 'This item already has a pending request'}), 400
 
-        # Create transaction; keep item visible until seller/admin accepts
+        # Create transaction; keep item visible until seller proposes
         transaction = Transaction(
             item_id=item_id,
             buyer_id=user_id,
@@ -407,46 +407,184 @@ def create_transaction():
         return jsonify({'error': 'Failed to create transaction', 'details': str(e)}), 500
 
 
+@marketplace_bp.route('/transactions/<int:transaction_id>/propose', methods=['POST'])
+@jwt_required()
+def propose_transaction(transaction_id):
+    """Seller proposes pickup datetime and location; moves status to awaiting_buyer."""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        data = request.get_json(silent=True) or {}
+        pickup_at_raw = (data.get('pickup_at') or '').strip()
+        pickup_location = (data.get('pickup_location') or '').strip()
+        if not pickup_at_raw:
+            return jsonify({'error': 'pickup_at is required'}), 400
+        if not pickup_location:
+            return jsonify({'error': 'pickup_location is required'}), 400
+        try:
+            parsed = datetime.fromisoformat(pickup_at_raw.replace('Z', '+00:00'))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            when_utc = parsed.astimezone(timezone.utc)
+        except Exception:
+            return jsonify({'error': 'pickup_at must be ISO-8601'}), 400
+        if when_utc <= datetime.now(timezone.utc) + timedelta(minutes=5):
+            return jsonify({'error': 'pickup_at must be at least 5 minutes in the future'}), 400
+
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        if tx.seller_id != uid:
+            return jsonify({'error': 'Only the seller can propose pickup details'}), 403
+        if tx.status != 'pending' and tx.status != 'awaiting_buyer':
+            return jsonify({'error': 'Proposal not allowed in current status'}), 400
+
+        tx.pickup_at = when_utc.replace(tzinfo=None)
+        tx.pickup_location = pickup_location
+        tx.status = 'awaiting_buyer'
+        tx.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'message': 'Pickup details proposed', 'transaction': tx.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to propose pickup details', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/confirm', methods=['POST'])
+@jwt_required()
+def buyer_confirm_transaction(transaction_id):
+    """Buyer confirms the proposed pickup details; reserves item and accepts."""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        if tx.buyer_id != uid:
+            return jsonify({'error': 'Only the buyer can confirm'}), 403
+        if tx.status != 'awaiting_buyer':
+            return jsonify({'error': 'Transaction is not awaiting buyer confirmation'}), 400
+        if not tx.pickup_at or not tx.pickup_location:
+            return jsonify({'error': 'Pickup details are incomplete'}), 400
+
+        # Reserve the item and accept
+        item = Item.query.get(tx.item_id)
+        if item and item.status == 'available':
+            item.status = 'reserved'
+            item.updated_at = datetime.utcnow()
+        tx.status = 'accepted'
+        tx.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'message': 'Transaction accepted by buyer', 'transaction': tx.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to confirm transaction', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/reject-buyer', methods=['POST'])
+@jwt_required()
+def buyer_reject_transaction(transaction_id):
+    """Buyer rejects the proposed pickup; frees item for new requests and marks transaction rejected."""
+    try:
+        user_id = get_jwt_identity()
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        if tx.buyer_id != uid:
+            return jsonify({'error': 'Only the buyer can reject the proposal'}), 403
+        if tx.status != 'awaiting_buyer':
+            return jsonify({'error': 'Transaction is not awaiting buyer confirmation'}), 400
+
+        # Free the item for new requests
+        item = Item.query.get(tx.item_id)
+        if item and item.is_active:
+            item.status = 'available'
+            item.updated_at = datetime.utcnow()
+        tx.status = 'rejected'
+        tx.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'message': 'Proposal rejected. Item is available again.', 'transaction': tx.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to reject proposal', 'details': str(e)}), 500
+
+
 @marketplace_bp.route('/transactions/<int:transaction_id>/accept', methods=['POST'])
 @jwt_required()
 def accept_transaction(transaction_id):
-    """Accept a transaction request (seller only)."""
+    """Legacy: Direct seller acceptance. Prefer /propose + buyer confirmation flow."""
     try:
         user_id = get_jwt_identity()
+        # Normalize identity to integer when possible to match DB values
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        data = request.get_json(silent=True) or {}
+        pickup_at_raw = (data.get('pickup_at') or '').strip()
+        pickup_location = (data.get('pickup_location') or '').strip()
+        if not pickup_at_raw:
+            return jsonify({'error': 'pickup_at is required'}), 400
+        if not pickup_location:
+            return jsonify({'error': 'pickup_location is required'}), 400
+        # Parse ISO datetime; accept both with 'Z' and with explicit offset
+        try:
+            parsed = datetime.fromisoformat(pickup_at_raw.replace('Z', '+00:00'))
+            if parsed.tzinfo is None:
+                # Assume UTC if no tz provided
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            when_utc = parsed.astimezone(timezone.utc)
+        except Exception:
+            return jsonify({'error': 'pickup_at must be ISO-8601'}), 400
+        # Require pickup to be at least 5 minutes in the future
+        if when_utc <= datetime.now(timezone.utc) + timedelta(minutes=5):
+            return jsonify({'error': 'pickup_at must be at least 5 minutes in the future'}), 400
         transaction = Transaction.query.get(transaction_id)
         
         if not transaction:
             return jsonify({'error': 'Transaction not found'}), 404
         
         # Check if seller
-        if transaction.seller_id != user_id:
+        if transaction.seller_id != uid:
             return jsonify({'error': 'Only the seller can accept this transaction'}), 403
         
-        if transaction.status != 'pending':
+        if transaction.status not in ['pending', 'awaiting_buyer']:
             return jsonify({'error': 'Transaction cannot be accepted in its current state'}), 400
         
-        # Accept transaction and reserve the item
-        transaction.status = 'accepted'
+        # Store details and move to awaiting_buyer to require buyer confirmation
+        transaction.pickup_at = when_utc.replace(tzinfo=None)
+        transaction.pickup_location = pickup_location
+        transaction.status = 'awaiting_buyer'
         transaction.updated_at = datetime.utcnow()
 
+        # Do NOT reserve item yet; reservation happens upon buyer confirmation
         try:
             item = Item.query.get(transaction.item_id)
-            if item and item.status == 'available':
-                item.status = 'reserved'
+            if item and item.status == 'reserved' and transaction.status == 'pending':
+                # normalize any inconsistent state
+                item.status = 'available'
                 item.updated_at = datetime.utcnow()
         except Exception:
             pass
 
         db.session.commit()
         
-        return jsonify({
-            'message': 'Transaction accepted successfully',
-            'transaction': transaction.to_dict()
-        }), 200
+        return jsonify({'message': 'Pickup details saved. Awaiting buyer confirmation.', 'transaction': transaction.to_dict()}), 200
     
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to accept transaction', 'details': str(e)}), 500
+
 
 @marketplace_bp.route('/transactions/<int:transaction_id>/reject', methods=['POST'])
 @jwt_required()
@@ -463,8 +601,8 @@ def reject_transaction(transaction_id):
         if transaction.seller_id != user_id:
             return jsonify({'error': 'Only the seller can reject this transaction'}), 403
 
-        if transaction.status != 'pending':
-            return jsonify({'error': 'Only pending transactions can be rejected'}), 400
+        if transaction.status != 'pending' and transaction.status != 'awaiting_buyer':
+            return jsonify({'error': 'Only pending or awaiting_buyer transactions can be rejected'}), 400
 
         transaction.status = 'rejected'
         transaction.updated_at = datetime.utcnow()

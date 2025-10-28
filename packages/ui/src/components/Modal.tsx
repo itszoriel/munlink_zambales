@@ -19,12 +19,21 @@ export const Modal: React.FC<ModalProps> = ({ open, onOpenChange, title, childre
 
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4" onClick={() => onOpenChange(false)}>
-      <div className={`w-full max-w-2xl rounded-lg bg-[var(--color-card)] text-[var(--color-card-foreground)] border border-[var(--color-border)] shadow-xl ${className || ''}`.trim()} onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4"
+      onClick={() => onOpenChange(false)}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="absolute inset-0 bg-black/50" />
+      <div
+        className={`relative w-full max-w-none sm:max-w-2xl bg-[var(--color-card)] text-[var(--color-card-foreground)] border border-[var(--color-border)] shadow-xl rounded-none sm:rounded-2xl ${className || ''}`.trim()}
+        onClick={(e) => e.stopPropagation()}
+      >
         {(title !== undefined) && (
           <div className="p-4 border-b border-[var(--color-border)]"><h2 className="text-lg font-semibold">{title}</h2></div>
         )}
-        <div className="p-4">{children}</div>
+        <div className="p-4 max-h-[calc(100vh-200px)] overflow-y-auto">{children}</div>
         {footer !== undefined ? (
           <div className="p-4 border-t border-[var(--color-border)]">{footer}</div>
         ) : null}

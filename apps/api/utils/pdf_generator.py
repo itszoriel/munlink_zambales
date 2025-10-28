@@ -72,6 +72,21 @@ def _load_municipality_officials() -> Dict[str, Dict]:
         return {}
 
 
+def _load_barangay_officials() -> Dict[str, Dict[str, str]]:
+    """Load Punong Barangay names per municipality and barangay.
+
+    File format: { "Municipality": { "Barangay Name": "Punong Barangay Name" } }
+    """
+    try:
+        cfg_path = Path(current_app.root_path) / "config" / "barangayOfficials.json"
+        if not cfg_path.exists():
+            return {}
+        import json
+
+        return json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
 def _resolve_logo_paths(municipality_name: str) -> Tuple[Path | None, Path | None]:
     """Return (municipal_logo, province_logo) if available."""
     # Compute repository root from Flask app root (apps/api)
@@ -478,21 +493,62 @@ def generate_document_pdf(request, document_type, user, admin_user: Optional[obj
     
     # Load municipality officials data
     officials = _load_municipality_officials()
+    barangay_officials = _load_barangay_officials()
     mun_officials = officials.get(municipality_name, {})
-    
-    # Get mayor or punong barangay name from config
+
+    # Helper to normalize names for lookup (tolerate accents, punctuation, spacing)
+    def _norm(s: str) -> str:
+        try:
+            import unicodedata as _ud
+            s2 = _ud.normalize('NFKD', s or '')
+            s2 = ''.join(ch for ch in s2 if not _ud.combining(ch))
+        except Exception:
+            s2 = (s or '')
+        s2 = s2.strip().lower()
+        # Remove punctuation we don't care about and unify spacing
+        s2 = s2.replace('.', '').replace('-', ' ').replace('(', ' ').replace(')', ' ')
+        # Normalize common variants: "(Pob.)" -> "poblacion"
+        s2 = s2.replace(' pob ', ' poblacion ')
+        s2 = s2.replace(' pob.', ' poblacion')
+        s2 = s2.replace(' (pob) ', ' poblacion ')
+        s2 = s2.replace(' (pob.) ', ' poblacion ')
+        s2 = s2.replace('pob.', 'poblacion')
+        while '  ' in s2:
+            s2 = s2.replace('  ', ' ')
+        return s2
+
     if level == 'barangay':
-        # For barangay level, use punong barangay if available in config
-        official_name = mun_officials.get('punong_barangay') or official_title
+        # Prefer explicit Punong Barangay list by municipality + barangay
+        pb_name = None
+        try:
+            muni_map = barangay_officials.get(municipality_name) or {}
+            lookup = { _norm(k): v for k, v in muni_map.items() }
+            pb_name = lookup.get(_norm(barangay_name))
+        except Exception:
+            pb_name = None
+        # Fallback to municipalityOfficials.json if it contains punong_barangay
+        official_name = pb_name or mun_officials.get('punong_barangay') or official_title
     else:
-        # For municipal level, use mayor from config
+        # Municipal level uses mayor
         official_name = mun_officials.get('mayor') or official_title
 
     by_name = None
     if admin_user is not None:
         by_name = ' '.join(filter(None, [getattr(admin_user, 'first_name', None), getattr(admin_user, 'last_name', None)])) or getattr(admin_user, 'username', None)
     by_name = by_name or 'Municipal Records Officer'
-    by_role = 'Municipal Admin' if level != 'barangay' else 'Barangay Admin'
+    # Prefer actual admin user's role label when available
+    by_role = None
+    if admin_user is not None:
+        try:
+            admin_role = getattr(admin_user, 'role', None)
+            if admin_role == 'admin':
+                by_role = 'Admin'
+            elif admin_role == 'municipal_admin':
+                by_role = 'Municipal Admin'
+        except Exception:
+            by_role = None
+    if not by_role:
+        by_role = 'Municipal Admin' if level != 'barangay' else 'Barangay Admin'
 
     c.drawString(25 * mm, 42 * mm, f"FOR: {official_name}")
     c.drawString(25 * mm, 37 * mm, official_title)

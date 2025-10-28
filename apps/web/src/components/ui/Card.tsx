@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 type Props = {
   variant?: 'default' | 'glass' | 'gradient' | 'elevated'

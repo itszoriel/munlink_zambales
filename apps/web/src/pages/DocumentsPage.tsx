@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowRight, ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import GatedAction from '@/components/GatedAction'
@@ -22,6 +23,7 @@ export default function DocumentsPage() {
   const selectedMunicipality = useAppStore((s) => s.selectedMunicipality)
   const user = useAppStore((s) => s.user)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [step, setStep] = useState(1)
   const [types, setTypes] = useState<DocType[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,6 +41,8 @@ export default function DocumentsPage() {
   const userBarangayName = (user as any)?.barangay_name // kept for review display and future use
   const [consent, setConsent] = useState(false)
   const [pickupLocation, setPickupLocation] = useState<'municipal'|'barangay'>('municipal')
+  const [myRequests, setMyRequests] = useState<any[]>([])
+  const [loadingMy, setLoadingMy] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -56,6 +60,24 @@ export default function DocumentsPage() {
     load()
     return () => { cancelled = true }
   }, [])
+
+  // Load my requests when tab=requests
+  useEffect(() => {
+    let cancelled = false
+    const tab = (searchParams.get('tab') || '').toLowerCase()
+    if (tab !== 'requests') return
+    ;(async () => {
+      try {
+        setLoadingMy(true)
+        const res = await documentsApi.getMyRequests()
+        const list = (res as any)?.data?.requests || (res as any)?.requests || []
+        if (!cancelled) setMyRequests(list)
+      } finally {
+        if (!cancelled) setLoadingMy(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [searchParams])
 
   // Initialize pickup selection from user profile
   useEffect(() => {
@@ -80,7 +102,37 @@ export default function DocumentsPage() {
 
   return (
     <div className="container-responsive py-12">
-      <h1 className="text-3xl font-serif font-semibold mb-6">Documents</h1>
+      <h1 className="text-fluid-3xl font-serif font-semibold mb-6">Documents</h1>
+      { (searchParams.get('tab') || '').toLowerCase() === 'requests' && (
+        <div className="bg-white rounded-xl border p-4 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">My Requests</h2>
+            <button className="btn-secondary" onClick={() => navigate('/documents')}>New Request</button>
+          </div>
+          {loadingMy ? (
+            <div className="text-sm text-gray-600">Loading…</div>
+          ) : myRequests.length === 0 ? (
+            <div className="text-sm text-gray-600">You have no document requests yet.</div>
+          ) : (
+            <div className="space-y-2">
+              {myRequests.map((r: any) => (
+                <div key={r.id} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-1 sm:gap-3 rounded-lg border px-3 py-2 items-center">
+                  <div className="min-w-0">
+                    <Link to={`/dashboard/requests/${r.id}`} className="block font-medium text-blue-700 hover:underline truncate">
+                      {r.document_type?.name || r.request_number || 'Document Request'}
+                    </Link>
+                    <div className="text-xs text-gray-600 truncate">{r.request_number}</div>
+                  </div>
+                  <div className="flex items-center gap-2 sm:justify-end shrink-0">
+                    <span className="px-2.5 py-1 text-xs rounded-full ring-1 bg-gray-100 text-gray-700 capitalize">{r.status}</span>
+                    <Link to={`/dashboard/requests/${r.id}`} className="btn-ghost text-blue-700">Open</Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {isMismatch && (
         <div className="mb-4 p-3 rounded-lg border border-yellow-300 bg-yellow-50 text-sm text-yellow-900">
           You are viewing {selectedMunicipality?.name}. Actions are limited to your registered municipality{userMunicipalityName?`: ${userMunicipalityName}`:'.'}
@@ -118,15 +170,20 @@ export default function DocumentsPage() {
                           <p className="text-sm text-gray-600">Processing: {t.processing_days} days</p>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm text-gray-700">Fee</div>
-                          <div className="text-lg font-bold">₱{t.fee?.toFixed(2)}</div>
-                          <div className="mt-1 text-xs">
-                            {t.supports_digital && Number(t.fee||0) <= 0 ? (
-                              <span className="inline-block rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5">Free digital</span>
-                            ) : (
-                              <span className="inline-block rounded-full bg-gray-100 text-gray-700 px-2 py-0.5">In-person only</span>
-                            )}
-                          </div>
+                          {Number(t.fee || 0) > 0 ? (
+                            <>
+                              <div className="text-sm text-gray-700">Fee</div>
+                              <div className="text-lg font-bold">₱{Number(t.fee).toFixed(2)}</div>
+                            </>
+                          ) : (
+                            <div className="mt-1 text-xs">
+                              {t.supports_digital ? (
+                                <span className="inline-block rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5">Free digital copy</span>
+                              ) : (
+                                <span className="inline-block rounded-full bg-gray-100 text-gray-700 px-2 py-0.5">Pickup only</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </button>

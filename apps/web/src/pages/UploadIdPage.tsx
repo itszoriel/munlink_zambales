@@ -57,7 +57,7 @@ export default function UploadIdPage() {
   return (
     <div className="min-h-[calc(100vh-200px)] py-12 px-4">
       <div className="card max-w-2xl mx-auto">
-        <h1 className="text-2xl font-bold mb-2">Upload Verification Documents</h1>
+        <h1 className="text-fluid-3xl font-serif font-semibold mb-2">Upload Verification Documents</h1>
         {hasIdDocuments ? (
           <p className="text-sm text-gray-600 mb-6">You have already uploaded ID documents. You can upload new ones to replace the existing ones.</p>
         ) : (
@@ -75,23 +75,23 @@ export default function UploadIdPage() {
 
         <form onSubmit={onSubmit} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium mb-1">Valid ID - Front</label>
-            <input type="file" accept="image/*" onChange={(e)=>setFront(e.target.files?.[0] || null)} />
+            <label htmlFor="id-front" className="block text-sm font-medium mb-1">Valid ID - Front</label>
+            <input id="id-front" name="id_front" className="input-field" type="file" accept="image/*" onChange={(e)=>setFront(e.target.files?.[0] || null)} />
             {front && <p className="text-xs text-gray-500 mt-1">Selected: {front.name}</p>}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Valid ID - Back</label>
-            <input type="file" accept="image/*" onChange={(e)=>setBack(e.target.files?.[0] || null)} />
+            <label htmlFor="id-back" className="block text-sm font-medium mb-1">Valid ID - Back</label>
+            <input id="id-back" name="id_back" className="input-field" type="file" accept="image/*" onChange={(e)=>setBack(e.target.files?.[0] || null)} />
             {back && <p className="text-xs text-gray-500 mt-1">Selected: {back.name}</p>}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Selfie holding the ID (optional)</label>
-            <input type="file" accept="image/*" onChange={(e)=>setSelfie(e.target.files?.[0] || null)} />
+            <label htmlFor="id-selfie" className="block text-sm font-medium mb-1">Selfie holding the ID (optional)</label>
+            <input id="id-selfie" name="id_selfie" className="input-field" type="file" accept="image/*" onChange={(e)=>setSelfie(e.target.files?.[0] || null)} />
             {selfie && <p className="text-xs text-gray-500 mt-1">Selected: {selfie.name}</p>}
           </div>
 
           <div className="pt-2">
-            <button className="btn btn-primary" disabled={!canSubmit || submitting}>
+            <button className="btn btn-primary w-full sm:w-auto" disabled={!canSubmit || submitting}>
               {submitting ? 'Uploading...' : 'Upload'}
             </button>
           </div>

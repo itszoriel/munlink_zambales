@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { benefitsApi, benefitsAdminApi, handleApiError, showToast } from '../lib/api'
 import { useAdminStore } from '../lib/store'
 import { Modal, Button } from '@munlink/ui'
+import { ClipboardList, Users, Hourglass, CheckCircle } from 'lucide-react'
 
 export default function Benefits() {
   const [activeTab, setActiveTab] = useState<'active' | 'applications' | 'archived'>('active')
@@ -129,6 +130,14 @@ export default function Benefits() {
     }
   }
 
+  function IconFromCode({ code, className }: { code: string; className?: string }) {
+    if (code === '📋') return <ClipboardList className={className || 'w-6 h-6'} aria-hidden="true" />
+    if (code === '👥') return <Users className={className || 'w-6 h-6'} aria-hidden="true" />
+    if (code === '⏳') return <Hourglass className={className || 'w-6 h-6'} aria-hidden="true" />
+    if (code === '✅') return <CheckCircle className={className || 'w-6 h-6'} aria-hidden="true" />
+    return <ClipboardList className={className || 'w-6 h-6'} aria-hidden="true" />
+  }
+
   return (
     <div className="min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
@@ -145,7 +154,10 @@ export default function Benefits() {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-8">
         {stats.map((stat, i) => (
           <div key={i} className="bg-white/70 backdrop-blur-xl rounded-2xl p-6 border border-white/50 shadow-lg hover:scale-105 transition-transform">
-            <div className={`inline-flex w-12 h-12 bg-${stat.color}-100 rounded-xl items-center justify-center text-2xl mb-3`}>{stat.icon}</div>
+            <div className={`inline-flex w-12 h-12 bg-${stat.color}-100 rounded-xl items-center justify-center mb-3`}>
+              {/* @ts-ignore dynamic color class */}
+              <IconFromCode code={stat.icon as string} className="w-6 h-6" />
+            </div>
             <p className="text-3xl font-bold text-neutral-900 mb-1">{stat.value}</p>
             <p className="text-sm text-neutral-600">{stat.label}</p>
           </div>
@@ -154,7 +166,10 @@ export default function Benefits() {
           <div key={i} className="group bg-white/70 backdrop-blur-xl rounded-3xl shadow-lg border border-white/50">
             <div className={`relative h-32 bg-gradient-to-br from-${program.color}-400 to-${program.color}-600 flex items-center justify-center`}>
               <div className="absolute inset-0 bg-white/20" />
-              <span className="relative text-6xl">{program.icon}</span>
+              <span className="relative">
+                {/* @ts-ignore dynamic gradient color class */}
+                <IconFromCode code={program.icon as string} className="w-12 h-12 text-white" />
+              </span>
             </div>
             <div className="p-6">
               <div className="flex items-start justify-between mb-3">
@@ -167,10 +182,12 @@ export default function Benefits() {
                   <p className="text-xs text-neutral-600 mb-1">Beneficiaries</p>
                   <p className="text-lg font-bold text-neutral-900">{program.beneficiaries}</p>
                 </div>
-                <div className="bg-neutral-50 rounded-xl p-3">
-                  <p className="text-xs text-neutral-600 mb-1">Duration (days)</p>
-                  <p className="text-lg font-bold text-neutral-900">{program.duration_days ?? '—'}</p>
-                </div>
+                {Number(program.duration_days) > 0 && (
+                  <div className="bg-neutral-50 rounded-xl p-3">
+                    <p className="text-xs text-neutral-600 mb-1">Duration (days)</p>
+                    <p className="text-lg font-bold text-neutral-900">{program.duration_days}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -205,7 +222,10 @@ export default function Benefits() {
           <div key={i} className="group bg-white/70 backdrop-blur-xl rounded-3xl shadow-lg border border-white/50 hover:shadow-2xl hover:scale-105 transition-all duration-300">
             <div className={`relative h-32 bg-gradient-to-br from-${program.color}-400 to-${program.color}-600 flex items-center justify-center`}>
               <div className="absolute inset-0 bg-white/10" />
-              <span className="relative text-6xl">{program.icon}</span>
+              <span className="relative">
+                {/* @ts-ignore dynamic gradient color class */}
+                <IconFromCode code={program.icon as string} className="w-12 h-12 text-white" />
+              </span>
             </div>
             <div className="p-6">
               <div className="flex items-start justify-between mb-3">
@@ -218,10 +238,12 @@ export default function Benefits() {
                   <p className="text-xs text-neutral-600 mb-1">Beneficiaries</p>
                   <p className="text-lg font-bold text-neutral-900">{program.beneficiaries}</p>
                 </div>
-                <div className="bg-neutral-50 rounded-xl p-3">
-                  <p className="text-xs text-neutral-600 mb-1">Duration (days)</p>
-                  <p className="text-lg font-bold text-neutral-900">{program.duration_days ?? '—'}</p>
-                </div>
+                {Number(program.duration_days) > 0 && (
+                  <div className="bg-neutral-50 rounded-xl p-3">
+                    <p className="text-xs text-neutral-600 mb-1">Duration (days)</p>
+                    <p className="text-lg font-bold text-neutral-900">{program.duration_days}</p>
+                  </div>
+                )}
               </div>
               <div className="relative flex gap-2">
                 <button onClick={async () => { try { const res = await benefitsApi.getProgramById(program.id); setViewProgram((res as any)?.data || res) } catch (e: any) { setError(handleApiError(e)) } }} className="flex-1 py-2 bg-ocean-100 hover:bg-ocean-200 text-ocean-700 rounded-xl text-sm font-medium transition-colors">View Details</button>
@@ -270,7 +292,7 @@ export default function Benefits() {
             <div className="space-y-2">
               <p className="text-sm text-neutral-700"><span className="font-medium">Name:</span> {viewProgram.name || viewProgram.title}</p>
               <p className="text-sm text-neutral-700"><span className="font-medium">Type:</span> {viewProgram.program_type || '—'}</p>
-              {typeof viewProgram.duration_days !== 'undefined' && (<p className="text-sm text-neutral-700"><span className="font-medium">Duration:</span> {viewProgram.duration_days ?? '—'} days</p>)}
+              {Number(viewProgram.duration_days) > 0 && (<p className="text-sm text-neutral-700"><span className="font-medium">Duration:</span> {viewProgram.duration_days} days</p>)}
               <p className="text-sm text-neutral-700 whitespace-pre-wrap"><span className="font-medium">Description:</span> {viewProgram.description}</p>
             </div>
           )}

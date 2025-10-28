@@ -1,6 +1,6 @@
-import { ReactNode } from 'react'
+import React from 'react'
 
-type Props = { status: string | undefined | null; children?: ReactNode; className?: string }
+export type StatusBadgeProps = { status: string | undefined | null; className?: string; children?: React.ReactNode }
 
 const colorFor = (s: string) => {
   const t = s.toLowerCase()
@@ -11,10 +11,10 @@ const colorFor = (s: string) => {
   return 'bg-gray-100 text-gray-700 ring-gray-200'
 }
 
-export default function StatusBadge({ status, children, className = '' }: Props) {
+export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className = '', children }) => {
   const color = status ? colorFor(status) : 'bg-gray-100 text-gray-700 ring-gray-200'
   return (
-    <span className={`px-2.5 py-1 text-xs rounded-full ring-1 whitespace-nowrap capitalize ${color} ${className}`}>
+    <span className={`px-2.5 py-1 text-xs rounded-full ring-1 whitespace-nowrap capitalize ${color} ${className}`.trim()}>
       {children || status}
     </span>
   )

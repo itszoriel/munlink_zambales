@@ -46,7 +46,7 @@ export default function LoginPage() {
             className="h-16 w-16 object-contain opacity-90"
           />
         </div>
-        <h2 className="text-3xl font-bold text-center mb-6 text-zambales-green">
+        <h2 className="text-fluid-3xl font-serif font-semibold text-center mb-6 text-zambales-green">
           Login to MunLink
         </h2>
         

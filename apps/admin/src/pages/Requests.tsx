@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { adminApi, handleApiError, documentsAdminApi, mediaUrl, showToast } from '../lib/api'
+import { ClipboardList, Hourglass, Cog, CheckCircle, PartyPopper, Smartphone, Package as PackageIcon } from 'lucide-react'
 
-type Status = 'all' | 'pending' | 'processing' | 'ready' | 'completed'
+type Status = 'all' | 'pending' | 'processing' | 'ready' | 'completed' | 'picked_up'
 
 export default function Requests() {
   const [statusFilter, setStatusFilter] = useState<Status>('all')
@@ -206,9 +207,27 @@ export default function Requests() {
   const handleSetReady = async (row: any) => {
     try {
       setActionLoading(String(row.id))
-      await documentsAdminApi.updateStatus(row.request_id, 'ready')
+      const res = await documentsAdminApi.readyForPickup(row.request_id)
       await refresh()
-      showToast('Request marked as ready for pickup', 'success')
+      const claim = (res as any)?.claim || (res as any)?.data?.claim
+      if (claim?.code_masked) {
+        showToast(`Ready for pickup. Claim code: ${claim.code_masked}`, 'success')
+      } else {
+        showToast('Request marked as ready for pickup', 'success')
+      }
+    } catch (e: any) {
+      showToast(handleApiError(e), 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handlePickedUp = async (row: any) => {
+    try {
+      setActionLoading(String(row.id))
+      await documentsAdminApi.updateStatus(row.request_id, 'picked_up', 'Verified and released to resident')
+      await refresh()
+      showToast('Marked as picked up', 'success')
     } catch (e: any) {
       showToast(handleApiError(e), 'error')
     } finally {
@@ -267,7 +286,17 @@ export default function Requests() {
         ].map((item) => (
           <button key={item.status} onClick={() => setStatusFilter(item.status as Status)} className={`text-left p-4 rounded-2xl transition-all ${statusFilter === item.status ? 'bg-white/90 backdrop-blur-xl shadow-xl scale-105 border-2 border-ocean-500' : 'bg-white/70 backdrop-blur-xl border border-white/50 hover:scale-105'}`}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-2xl">{item.icon}</span>
+              <span className="text-2xl">
+                {(() => {
+                  const code = String(item.icon)
+                  if (code === '📋') return <ClipboardList className="w-6 h-6" aria-hidden="true" />
+                  if (code === '⏳') return <Hourglass className="w-6 h-6" aria-hidden="true" />
+                  if (code === '⚙️') return <Cog className="w-6 h-6" aria-hidden="true" />
+                  if (code === '✅') return <CheckCircle className="w-6 h-6" aria-hidden="true" />
+                  if (code === '🎉') return <PartyPopper className="w-6 h-6" aria-hidden="true" />
+                  return <ClipboardList className="w-6 h-6" aria-hidden="true" />
+                })()}
+              </span>
               <span className={`text-2xl font-bold ${statusFilter === item.status ? 'text-ocean-600' : 'text-neutral-900'}`}>{item.count}</span>
             </div>
             <p className="text-sm font-medium text-neutral-700">{item.label}</p>
@@ -315,8 +344,18 @@ export default function Requests() {
                     <p className="font-bold text-neutral-900 mb-1">{request.id}</p>
                     <div className="flex items-center gap-2">
                       <p className="text-sm text-neutral-600">{request.document}</p>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${request.delivery_method === 'digital' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                        {request.delivery_method === 'digital' ? '📱 Digital' : '📦 Pickup'}
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${request.delivery_method === 'digital' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                        {request.delivery_method === 'digital' ? (
+                          <>
+                            <Smartphone className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Digital</span>
+                          </>
+                        ) : (
+                          <>
+                            <PackageIcon className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Pickup</span>
+                          </>
+                        )}
                       </span>
                     </div>
                   </div>
@@ -335,11 +374,11 @@ export default function Requests() {
                     <p className="text-xs text-neutral-600">Submitted</p>
                   </div>
                   <div className="sm:col-span-2">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-medium ${request.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : request.status === 'processing' ? 'bg-ocean-100 text-ocean-700' : request.status === 'ready' ? 'bg-forest-100 text-forest-700' : 'bg-purple-100 text-purple-700'}`}>
-                      {request.status === 'pending' && '⏳ '}
-                      {request.status === 'processing' && '⚙️ '}
-                      {request.status === 'ready' && '✅ '}
-                      {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-medium ${request.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : request.status === 'processing' ? 'bg-ocean-100 text-ocean-700' : request.status === 'ready' ? 'bg-forest-100 text-forest-700' : request.status === 'picked_up' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>
+                      {request.status === 'pending' && <Hourglass className="w-3.5 h-3.5" aria-hidden="true" />}
+                      {request.status === 'processing' && <Cog className="w-3.5 h-3.5" aria-hidden="true" />}
+                      {request.status === 'ready' && <CheckCircle className="w-3.5 h-3.5" aria-hidden="true" />}
+                      <span>{request.status === 'picked_up' ? 'Picked Up' : (request.status.charAt(0).toUpperCase() + request.status.slice(1))}</span>
                     </span>
                   </div>
                   <div className="sm:col-span-1 text-left sm:text-right space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:justify-end sm:gap-2">
@@ -390,7 +429,14 @@ export default function Requests() {
                         onClick={() => handleSetReady(request)}
                         className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
                         disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Updating…' : 'Mark Ready'}</button>
+                      >{actionLoading === String(request.id) ? 'Updating…' : 'Generate Ticket & Mark Ready'}</button>
+                    )}
+                    {request.status === 'ready' && request.delivery_method === 'pickup' && (
+                      <button
+                        onClick={() => handlePickedUp(request)}
+                        className="w-full sm:w-auto px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                        disabled={actionLoading === String(request.id)}
+                      >{actionLoading === String(request.id) ? 'Saving…' : 'Mark Picked Up'}</button>
                     )}
                     {request.status === 'ready' && request.delivery_method === 'digital' && (
                       <button
@@ -415,12 +461,13 @@ export default function Requests() {
       </div>
       {/* Reject Modal */}
       {rejectForId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setRejectForId(null) }}>
           <div className="absolute inset-0 bg-black/40" onClick={() => setRejectForId(null)} />
-          <div className="relative bg-white w-[92%] max-w-md rounded-xl shadow-xl border p-5">
+          <div className="relative bg-white w-[92%] max-w-md max-h-[90vh] overflow-y-auto rounded-xl shadow-xl border p-5 pb-24 sm:pb-5" tabIndex={-1} autoFocus>
             <h3 className="text-lg font-semibold mb-2">Reject Request</h3>
             <p className="text-sm text-neutral-700 mb-3">Provide a reason to inform the resident.</p>
-            <textarea className="w-full border border-neutral-300 rounded-md p-2 text-sm" rows={4} value={rejectReason} onChange={(e)=> setRejectReason(e.target.value)} placeholder="e.g., Missing required details" />
+            <label htmlFor="reject-reason" className="block text-sm font-medium mb-1">Reason</label>
+            <textarea id="reject-reason" name="reject_reason" className="w-full border border-neutral-300 rounded-md p-2 text-sm" rows={4} value={rejectReason} onChange={(e)=> setRejectReason(e.target.value)} placeholder="e.g., Missing required details" />
             <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
               <button className="px-4 py-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm" onClick={() => setRejectForId(null)}>Cancel</button>
               <button className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm disabled:opacity-60" disabled={!rejectReason || actionLoading===String(rejectForId)} onClick={submitReject}>
@@ -432,24 +479,24 @@ export default function Requests() {
       )}
       {/* Edit Content Modal */}
       {editFor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setEditFor(null) }}>
           <div className="absolute inset-0 bg-black/40" onClick={() => setEditFor(null)} />
-          <div className="relative bg-white w-[92%] max-w-lg rounded-xl shadow-xl border p-5">
+          <div className="relative bg-white w-[92%] max-w-lg max-h-[90vh] overflow-y-auto rounded-xl shadow-xl border p-5 pb-24 sm:pb-5" tabIndex={-1} autoFocus>
             <h3 className="text-lg font-semibold mb-2">Edit Request Content</h3>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium mb-1">Purpose</label>
-                <input className="w-full border border-neutral-300 rounded-md p-2 text-sm" value={editFor.purpose} onChange={(e)=> setEditFor({ ...editFor, purpose: e.target.value })} />
+                <label htmlFor="edit-purpose" className="block text-sm font-medium mb-1">Purpose</label>
+                <input id="edit-purpose" name="edit_purpose" className="w-full border border-neutral-300 rounded-md p-2 text-sm" value={editFor.purpose} onChange={(e)=> setEditFor({ ...editFor, purpose: e.target.value })} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Remarks or Additional Information</label>
-                <textarea className="w-full border border-neutral-300 rounded-md p-2 text-sm" rows={4} value={editFor.remarks} onChange={(e)=> setEditFor({ ...editFor, remarks: e.target.value })} placeholder="Provide extra context or clarifications" />
+                <label htmlFor="edit-remarks" className="block text-sm font-medium mb-1">Remarks or Additional Information</label>
+                <textarea id="edit-remarks" name="edit_remarks" className="w-full border border-neutral-300 rounded-md p-2 text-sm" rows={4} value={editFor.remarks} onChange={(e)=> setEditFor({ ...editFor, remarks: e.target.value })} placeholder="Provide extra context or clarifications" />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Civil Status / Age (optional)</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input className="w-full border border-neutral-300 rounded-md p-2 text-sm" value={editFor.civil_status} onChange={(e)=> setEditFor({ ...editFor, civil_status: e.target.value })} placeholder="e.g., single" />
-                  <input className="w-full border border-neutral-300 rounded-md p-2 text-sm" type="number" min={0} value={editFor.age || ''} onChange={(e)=> setEditFor({ ...editFor, age: e.target.value })} placeholder="Age e.g., 22" />
+                  <input id="edit-civil" name="edit_civil_status" className="w-full border border-neutral-300 rounded-md p-2 text-sm" value={editFor.civil_status} onChange={(e)=> setEditFor({ ...editFor, civil_status: e.target.value })} placeholder="e.g., single" />
+                  <input id="edit-age" name="edit_age" className="w-full border border-neutral-300 rounded-md p-2 text-sm" type="number" min={0} value={editFor.age || ''} onChange={(e)=> setEditFor({ ...editFor, age: e.target.value })} placeholder="Age e.g., 22" />
                 </div>
               </div>
             </div>

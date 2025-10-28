@@ -2,6 +2,7 @@
 const colors = require('tailwindcss/colors')
 
 module.exports = {
+  presets: [require('../../packages/ui/tailwind.preset.cjs')],
   content: [
     './index.html',
     './src/**/*.{js,ts,jsx,tsx}',

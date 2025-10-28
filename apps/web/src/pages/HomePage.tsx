@@ -14,7 +14,7 @@ export default function HomePage() {
   const [featuredItems, setFeaturedItems] = useState<any[]>([])
   // Removed mock announcements; show nothing if none.
   // Keep marketplace fallback minimal to maintain layout without empty collapse.
-  const fallbackItems = []
+  const fallbackItems: Array<{ id?: number; title: string; price?: number; transaction_type: string; images?: string[] }> = []
 
   useEffect(() => {
     let cancelled = false
@@ -41,7 +41,7 @@ export default function HomePage() {
   return (
     <div>
       {/* Hero with scenic background and provincial seal watermark */}
-      <section className="relative h-[70vh] min-h-[520px] w-full overflow-hidden">
+      <section className="relative h-[70vh] min-h-[560px] w-full overflow-hidden">
         <img
           src={new URL('../../../../public/reference/Nature.jpg', import.meta.url).toString()}
           alt="Zambales scenic"
@@ -56,12 +56,12 @@ export default function HomePage() {
           style={{ filter: 'grayscale(100%)' }}
         />
         <div className="relative z-10 h-full flex items-center">
-          <div className="container-responsive">
+          <div className="w-full px-4 sm:px-6 lg:px-10 xl:px-12">
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="text-white text-4xl md:text-6xl font-serif font-semibold drop-shadow"
+              className="text-white leading-tight tracking-tight font-serif font-semibold drop-shadow text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-[5rem] 2xl:text-[6rem]"
             >
               Lalawigan ng Zambales
             </motion.h1>
@@ -69,7 +69,7 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.1 }}
-              className="text-white/90 mt-4 max-w-2xl text-lg"
+              className="text-white/90 mt-4 max-w-4xl leading-relaxed text-base sm:text-lg md:text-xl lg:text-2xl xl:text-[1.5rem] 2xl:text-[1.75rem]"
             >
              Munlink: Bringing Zambales municipalities into the digital age with modern, user-friendly solutions for municipal governance.
             </motion.p>

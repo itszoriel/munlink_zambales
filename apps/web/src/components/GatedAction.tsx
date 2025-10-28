@@ -60,9 +60,9 @@ export default function GatedAction({
       if (typeof originalOnClick === 'function') originalOnClick(e)
     }
     const ariaDisabled = (!allowed) || !!disabled
-    const childClass = `${(children as any).props?.className || ''} ${!allowed ? 'opacity-60 cursor-not-allowed' : ''}`.trim()
+    const childClass = `${(children as any).props?.className || ''} ${className || ''} ${!allowed ? 'opacity-60 cursor-not-allowed' : ''}`.trim()
     return cloneElement(children as any, { onClick: injectedOnClick, 'aria-disabled': ariaDisabled, className: childClass })
-  }, [children, allowed, disabled, loading, onAllowed])
+  }, [children, allowed, disabled, loading, onAllowed, className])
 
   return (
     <div className="relative inline-block group">

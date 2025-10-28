@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { authApi, mediaUrl, transferApi, showToast, municipalityApi } from '@/lib/api'
 import { ProfileCard, Form, FormField, Input, Button } from '@munlink/ui'
 
@@ -129,7 +130,7 @@ export default function ProfilePage() {
 
   return (
     <div className="container-responsive py-12">
-      <div className="max-w-3xl space-y-6">
+      <div className="max-w-3xl mx-auto space-y-6">
         <ProfileCard
           role="resident"
           name={`${form.first_name || ''} ${form.last_name || ''}`.trim() || (form.username || 'My Profile')}
@@ -201,7 +202,9 @@ export default function ProfilePage() {
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Request Municipality Transfer</h3>
-              <button onClick={() => setShowTransferModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+              <button onClick={() => setShowTransferModal(false)} className="text-gray-400 hover:text-gray-600" aria-label="Close">
+                <X className="w-5 h-5" aria-hidden="true" />
+              </button>
             </div>
             {transferError && <div className="mb-4 rounded-md border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm">{transferError}</div>}
             {transferOk && <div className="mb-4 rounded-md border border-green-200 bg-green-50 text-green-700 px-3 py-2 text-sm">{transferOk}</div>}

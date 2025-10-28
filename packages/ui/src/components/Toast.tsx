@@ -1,13 +1,13 @@
-import { useEffect } from 'react'
+import React, { useEffect } from 'react'
 import { CheckCircle, XCircle, AlertTriangle, Info, X } from 'lucide-react'
 
-type Props = {
+export type ToastProps = {
   type: 'success' | 'error' | 'warning' | 'info'
   message: string
   onClose: () => void
 }
 
-export default function Toast({ type, message, onClose }: Props) {
+export const Toast: React.FC<ToastProps> = ({ type, message, onClose }) => {
   useEffect(() => {
     const t = setTimeout(onClose, 3000)
     return () => clearTimeout(t)

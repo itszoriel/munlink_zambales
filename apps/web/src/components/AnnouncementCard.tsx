@@ -50,7 +50,7 @@ export default function AnnouncementCard({ id, title, content, municipality, pri
       <article onClick={handleClick}>
         <div className="relative w-full aspect-[4/3] overflow-hidden">
           {Array.isArray(images) && images[0] ? (
-            <img src={mediaUrl(images[0])} alt="announcement" className="h-full w-full object-cover transform transition-transform duration-300 group-hover:scale-[1.03]" />
+            <img src={mediaUrl(images[0])} alt="announcement" loading="lazy" className="h-full w-full object-cover transform transition-transform duration-300 group-hover:scale-[1.03]" />
           ) : (
             <div className="h-full w-full bg-neutral-100" />
           )}

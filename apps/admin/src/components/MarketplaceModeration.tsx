@@ -2,7 +2,7 @@
  * MunLink Zambales - Marketplace Moderation Component
  * Component for moderating marketplace listings
  */
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { marketplaceApi, handleApiError } from '../lib/api'
 
 interface MarketplaceItem {
