@@ -107,7 +107,7 @@ export default function AnnouncementsPage() {
                 createdAt={a.created_at}
                 images={a.images}
                 pinned={(a as any).pinned}
-                href={undefined}
+                href={`/announcements/${a.id}`}
               />
             ))}
           </div>

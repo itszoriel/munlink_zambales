@@ -4,6 +4,7 @@ import { exportAdminApi, mediaUrl, showToast } from '../../lib/api'
 export default function ExportArchive({ defaultRange, onRangeChange }: { defaultRange: string; onRangeChange: (r: string)=>void }) {
   const [working, setWorking] = useState<string>('')
   const [range, setRange] = useState<string>(defaultRange)
+  const [lastArchiveUrl, setLastArchiveUrl] = useState<string>('')
   const entities: Array<{ key: any; label: string; desc: string }> = [
     { key: 'users', label: 'Users', desc: 'All residents in your municipality' },
     { key: 'benefits', label: 'Benefits', desc: 'Active benefits and programs' },
@@ -37,8 +38,13 @@ export default function ExportArchive({ defaultRange, onRangeChange }: { default
     setWorking('cleanup')
     try {
       const res = await exportAdminApi.cleanup({ entity: cleanupEntity as any, before: cleanupBefore || undefined, confirm: 'DELETE', archive })
-      const msg = `Deleted ${((res as any)?.deleted_count) ?? 0}${(res as any)?.archived_url ? ' • Archived' : ''}`
+      const archivedUrl = (res as any)?.archived_url
+      const msg = `Deleted ${((res as any)?.deleted_count) ?? 0}${archivedUrl ? ' • Archived' : ''}`
       showToast(msg, 'success')
+      if (archivedUrl) {
+        setLastArchiveUrl(archivedUrl)
+        try { window.open(mediaUrl(archivedUrl), '_blank') } catch {}
+      }
     } catch (e: any) {
       showToast('Cleanup failed', 'error')
     } finally {
@@ -98,6 +104,11 @@ export default function ExportArchive({ defaultRange, onRangeChange }: { default
             <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={archive} onChange={(e)=> setArchive(e.target.checked)} /> Archive before delete</label>
             <button className="ml-auto px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-sm disabled:opacity-60" disabled={!cleanupEntity || confirm!=='DELETE' || working==='cleanup'} onClick={doCleanup}>{working==='cleanup'?'Cleaning…':'Run Cleanup'}</button>
           </div>
+          {lastArchiveUrl && (
+            <div className="sm:col-span-2 lg:col-span-4 text-xs text-neutral-600 mt-1">
+              Last archive: <a className="text-ocean-700 hover:underline" href={mediaUrl(lastArchiveUrl)} target="_blank" rel="noreferrer">Open</a>
+            </div>
+          )}
         </div>
       </div>
     </div>

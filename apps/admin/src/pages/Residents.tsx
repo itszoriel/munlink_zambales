@@ -4,12 +4,15 @@ import { useLocation } from 'react-router-dom'
 import { useAdminStore } from '../lib/store'
 import { DataTable, Modal, Button } from '@munlink/ui'
 import { X, Check, RotateCcw, Pause, ExternalLink, Hourglass } from 'lucide-react'
+import TransferRequestCard from '../components/transfers/TransferRequestCard'
+import TransferRequestModal from '../components/transfers/TransferRequestModal'
 
 export default function Residents() {
   const location = useLocation()
   const adminMunicipalityName = useAdminStore((s) => s.user?.admin_municipality_name || s.user?.municipality_name)
   const adminMunicipalitySlug = useAdminStore((s) => s.user?.admin_municipality_slug || s.user?.municipality_slug)
   const adminMunicipalityId = useAdminStore((s) => (s.user as any)?.admin_municipality_id || (s.user as any)?.municipality_id)
+  const [activeTab, setActiveTab] = useState<'residents'|'transfers'>('residents')
   const [filter, setFilter] = useState<'all' | 'verified' | 'pending' | 'suspended'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -78,13 +81,24 @@ export default function Residents() {
     return () => { mounted = false }
   }, [])
 
-  // Load transfer requests scoped to admin municipality
+  // Transfers filters & pagination
+  const [transferStatus, setTransferStatus] = useState<'all'|'pending'|'approved'|'rejected'|'accepted'>('all')
+  const [transferQuery, setTransferQuery] = useState('')
+  const [transferSort, setTransferSort] = useState<'created_at'|'status'>('created_at')
+  const [transferOrder, setTransferOrder] = useState<'asc'|'desc'>('desc')
+  const [transferPage, setTransferPage] = useState(1)
+  const transferPerPage = 12
+
+  // Load transfer requests scoped to admin municipality with filters
   useEffect(() => {
     let cancelled = false
     const loadTransfers = async () => {
       try {
         setLoadingTransfers(true)
-        const res = await transferAdminApi.list()
+        const params: any = { page: transferPage, per_page: transferPerPage, sort: transferSort, order: transferOrder }
+        if (transferStatus !== 'all') params.status = transferStatus
+        if (transferQuery) params.q = transferQuery
+        const res = await transferAdminApi.list(params)
         const data = (res as any)?.data || res
         if (!cancelled) setTransfers(data?.transfers || [])
       } catch (e) {
@@ -95,7 +109,7 @@ export default function Residents() {
     }
     loadTransfers()
     return () => { cancelled = true }
-  }, [])
+  }, [transferStatus, transferQuery, transferSort, transferOrder, transferPage])
 
   // Load municipalities map for ID -> name
   useEffect(() => {
@@ -165,11 +179,7 @@ export default function Residents() {
     setDetailOpen(true)
   }
 
-  const openResidentByUserId = (userId: number) => {
-    // Open modal; it will fetch fresh user details inside
-    setSelected({ id: String(userId), name: '', email: '', phone: '', municipality: '', status: 'pending', joined: '', avatar: 'U' })
-    setDetailOpen(true)
-  }
+  // openResidentByUserId removed in favor of dedicated transfer modal
 
   const updateRowStatus = (userId: string, status: 'verified' | 'pending' | 'suspended') => {
     setRows((prev: any[]) => prev.map((r: any) => (String(r.id) === String(userId) ? { ...r, status } : r)))
@@ -212,15 +222,28 @@ export default function Residents() {
     <div className="min-h-screen">
       <div className="">
         <div className="">
-          <div className="flex items-start justify-between gap-3 mb-8">
+          <div className="flex items-start justify-between gap-3 mb-6">
             <div>
               <h1 className="text-3xl font-bold text-neutral-900">Residents</h1>
-              <p className="text-neutral-600">Manage verified residents and user accounts</p>
+              <p className="text-neutral-600">Manage verified residents, and municipality transfer requests</p>
             </div>
-            <div className="flex items-center gap-2 shrink-0" />
+          </div>
+          <div className="mb-6">
+            <div className="inline-flex rounded-xl border border-neutral-200 bg-white overflow-hidden">
+              {[
+                { key: 'residents', label: 'Residents' },
+                { key: 'transfers', label: 'Transfer Requests' },
+              ].map((t: any) => (
+                <button key={t.key}
+                  onClick={() => setActiveTab(t.key)}
+                  className={`px-4 py-2 text-sm font-medium ${activeTab===t.key? 'bg-ocean-600 text-white' : 'bg-white text-neutral-700 hover:bg-neutral-50'}`}
+                >{t.label}</button>
+              ))}
+            </div>
           </div>
 
-          {/* Toolbar: Search + Filters */}
+          {/* Residents Toolbar: Search + Filters */}
+          {activeTab==='residents' && (
           <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-4 md:p-6 shadow-lg border border-white/50 mb-6">
             <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 items-stretch">
               <div className="flex-1 min-w-0">
@@ -258,8 +281,10 @@ export default function Residents() {
               )}
             </div>
           </div>
+          )}
 
-          {/* Transfer Requests */}
+          {/* Transfer Requests Tab */}
+          {activeTab==='transfers' && (
           <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-6 shadow-lg border border-white/50 mb-6">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -267,88 +292,61 @@ export default function Residents() {
                 <p className="text-neutral-600 text-sm">Approve (outgoing) or accept (incoming) transfers for {adminMunicipalityName}</p>
               </div>
             </div>
+            {/* Filters */}
+            <div className="mb-4 flex flex-col md:flex-row gap-3 md:items-center">
+              <div className="flex-1 min-w-0">
+                <input className="w-full border rounded px-3 py-2 text-sm" value={transferQuery} onChange={(e)=> { setTransferPage(1); setTransferQuery(e.target.value) }} placeholder="Search by resident, email, or transfer #" />
+              </div>
+              <div className="flex gap-2">
+                <select className="border rounded px-2 py-1 text-sm" value={transferStatus} onChange={(e)=> { setTransferPage(1); setTransferStatus(e.target.value as any) }}>
+                  <option value="all">All</option>
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Denied</option>
+                  <option value="accepted">Completed</option>
+                </select>
+                <select className="border rounded px-2 py-1 text-sm" value={transferSort} onChange={(e)=> setTransferSort(e.target.value as any)}>
+                  <option value="created_at">Newest</option>
+                  <option value="status">Status</option>
+                </select>
+                <select className="border rounded px-2 py-1 text-sm" value={transferOrder} onChange={(e)=> setTransferOrder(e.target.value as any)}>
+                  <option value="desc">Desc</option>
+                  <option value="asc">Asc</option>
+                </select>
+              </div>
+            </div>
             {loadingTransfers ? (
               <div className="text-sm text-neutral-600">Loading transfers…</div>
             ) : transfers.length === 0 ? (
               <div className="text-sm text-neutral-600">No transfer requests.</div>
             ) : (
-              <DataTable
-                className="data-table bg-white/70 backdrop-blur-xl"
-                columns={[
-                  { key: 'resident', header: 'Resident', className: 'md:col-span-3 xl:col-span-3', render: (t: any) => (
-                    <div className="flex items-center h-10 min-w-0" title={`Transfer #${t.id}`}>
-                      <span className="font-medium truncate">Transfer #{t.id}</span>
-                    </div>
-                  ) },
-                  { key: 'from', header: 'From', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
-                    <div className="flex items-center h-10">{munMap[Number(t.from_municipality_id)] || t.from_municipality_id}</div>
-                  ) },
-                  { key: 'to', header: 'To', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
-                    <div className="flex items-center h-10">{munMap[Number(t.to_municipality_id)] || t.to_municipality_id}</div>
-                  ) },
-                  { key: 'status', header: 'Status', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
-                    <div className="flex items-center h-10">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${t.status === 'approved' ? 'bg-forest-100 text-forest-700' : t.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : t.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-ocean-100 text-ocean-700'}`}>
-                        {t.status.charAt(0).toUpperCase()+t.status.slice(1)}
-                      </span>
-                    </div>
-                  ) },
-                  { key: 'requested', header: 'Requested', className: 'md:col-span-2 xl:col-span-2', render: (t: any) => (
-                    <div className="flex items-center h-10">{t.created_at ? new Date(t.created_at).toLocaleString() : ''}</div>
-                  ) },
-                  { key: 'actions', header: 'Actions', className: 'md:col-span-2 xl:col-span-2 text-right min-w-[140px]', render: (t: any) => {
-                    const isPending = t.status === 'pending'
-                    const isApproved = t.status === 'approved'
-                    const canApprove = Number(t.from_municipality_id) === Number(adminMunicipalityId)
-                    const canAccept = Number(t.to_municipality_id) === Number(adminMunicipalityId)
-                    return (
-                      <div className="flex items-center justify-end h-10 gap-1 whitespace-nowrap">
-                        {isPending && (
-                          <>
-                            <button
-                              title={canApprove ? 'Reject' : 'Only source municipality can reject'}
-                              aria-label="Reject"
-                              className="icon-btn danger"
-                              onClick={(e) => { e.stopPropagation(); if (canApprove) updateTransferStatus(t.id,'rejected') }}
-                              disabled={actionLoading===`t-${t.id}` || !canApprove}
-                            >
-                              <X className="w-4 h-4" aria-hidden="true" />
-                            </button>
-                            <button
-                              title={canApprove ? 'Approve' : 'Only source municipality can approve'}
-                              aria-label="Approve"
-                              className="icon-btn primary"
-                              onClick={(e) => { e.stopPropagation(); if (canApprove) updateTransferStatus(t.id,'approved') }}
-                              disabled={actionLoading===`t-${t.id}` || !canApprove}
-                            >
-                              <Check className="w-4 h-4" aria-hidden="true" />
-                            </button>
-                          </>
-                        )}
-                        {isApproved && (
-                          <button
-                            title={canAccept ? 'Accept' : 'Only destination municipality can accept'}
-                            aria-label="Accept"
-                            className="icon-btn success"
-                            onClick={(e) => { e.stopPropagation(); if (canAccept) updateTransferStatus(t.id,'accepted') }}
-                            disabled={actionLoading===`t-${t.id}` || !canAccept}
-                          >
-                            <Check className="w-4 h-4" aria-hidden="true" />
-                          </button>
-                        )}
-                      </div>
-                    )
-                  } },
-                ]}
-                data={transfers}
-                onRowClick={(t: any) => openResidentByUserId(Number(t.user_id))}
-                emptyState={'No transfer requests'}
-                pagination={undefined}
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                {transfers.map((t: any) => {
+                  const canApprove = Number(t.from_municipality_id) === Number(adminMunicipalityId)
+                  const canAccept = Number(t.to_municipality_id) === Number(adminMunicipalityId)
+                  return (
+                    <TransferRequestCard
+                      key={t.id}
+                      t={t}
+                      munMap={munMap}
+                      canApprove={canApprove}
+                      canDeny={canApprove}
+                      canAccept={canAccept}
+                      onApprove={() => updateTransferStatus(t.id, 'approved')}
+                      onDeny={() => updateTransferStatus(t.id, 'rejected')}
+                      onAccept={() => updateTransferStatus(t.id, 'accepted')}
+                      onView={() => { setSelected(t); setDetailOpen(true) }}
+                      onHistory={async () => { setSelected(t); setDetailOpen(true) }}
+                    />
+                  )
+                })}
+              </div>
             )}
           </div>
+          )}
 
-          {/* Table */}
+          {/* Residents Table */}
+          {activeTab==='residents' && (
           <DataTable
             className="data-table bg-white/70 backdrop-blur-xl"
             columns={[
@@ -434,16 +432,20 @@ export default function Residents() {
             emptyState={loading ? 'Loading…' : (error ? error : 'No residents found')}
             pagination={{ page, pageSize: perPage, total: filtered.length, onChange: (p: number) => setPage(p) }}
           />
+          )}
         </div>
       </div>
       {/* Detail Modal */}
-      {detailOpen && (
+      {detailOpen && activeTab==='residents' && (
         <ResidentDetailModal
           userId={Number(selected?.id)}
           basic={selected}
           onClose={() => setDetailOpen(false)}
           onStatusChange={(id, status) => updateRowStatus(String(id), status)}
         />
+      )}
+      {detailOpen && activeTab==='transfers' && (
+        <TransferRequestModal open={true} onClose={() => setDetailOpen(false)} transfer={selected} />
       )}
     </div>
   )

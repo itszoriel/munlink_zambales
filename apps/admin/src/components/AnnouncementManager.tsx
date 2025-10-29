@@ -61,14 +61,13 @@ export default function AnnouncementManager({ onAnnouncementUpdated }: Announcem
     try {
       setActionLoading(id)
       await announcementApi.updateAnnouncement(id, data)
-      
-      // Update local state
-      setAnnouncements(prev => prev.map(announcement => 
-        announcement.id === id 
-          ? { ...announcement, ...data, updated_at: new Date().toISOString() }
-          : announcement
-      ))
-      
+      // Refresh from server to avoid stale image state
+      try {
+        const response = await announcementApi.getAnnouncements()
+        const fresh = (response as any).announcements || []
+        setAnnouncements(fresh)
+      } catch {}
+
       onAnnouncementUpdated?.(id)
       
       // Close modal if this was the selected announcement
@@ -111,14 +110,22 @@ export default function AnnouncementManager({ onAnnouncementUpdated }: Announcem
       const created = (response as any).announcement || (response as any).data?.announcement
       const id = created?.id
       if (id && files && files.length) {
-        for (const f of files.slice(0, 5)) {
-          try { await announcementApi.uploadImage(id, f) } catch {}
-        }
+        try {
+          await announcementApi.uploadImages(id, files.slice(0, 5))
+        } catch {}
+        // Fetch fresh announcements so newly uploaded images appear immediately
+        try {
+          const fresh = await announcementApi.getAnnouncements()
+          setAnnouncements((fresh as any).announcements || [])
+        } catch {}
       }
       
       // Add new announcement to list
       if (created) {
-        setAnnouncements(prev => [created, ...prev])
+        // If we didn't refresh above (no files), insert created directly
+        if (!(files && files.length)) {
+          setAnnouncements(prev => [created, ...prev])
+        }
         onAnnouncementUpdated?.(created.id)
       }
       
@@ -265,7 +272,7 @@ export default function AnnouncementManager({ onAnnouncementUpdated }: Announcem
 interface AnnouncementDetailModalProps {
   announcement: Announcement
   onClose: () => void
-  onUpdate: (id: number, data: any) => void
+  onUpdate: (id: number, data: any) => Promise<void>
   onDelete: (id: number) => void
   loading: boolean
 }
@@ -277,18 +284,72 @@ function AnnouncementDetailModal({
   onDelete, 
   loading 
 }: AnnouncementDetailModalProps) {
-  const [editMode, setEditMode] = useState(false)
+  const [editMode, setEditMode] = useState(true)
   const [formData, setFormData] = useState({
     title: announcement.title,
     content: announcement.content,
     priority: announcement.priority,
-    is_active: announcement.is_active
+    is_active: announcement.is_active,
+    external_url: (announcement as any).external_url || ''
   })
   const [uploading, setUploading] = useState(false)
   const [images, setImages] = useState<string[]>(announcement.images || [])
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const hasImageChanges = JSON.stringify(images) !== JSON.stringify(announcement.images || [])
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
 
-  const handleSave = () => {
-    onUpdate(announcement.id, { ...formData, images })
+  // Clamp index when images array changes
+  useEffect(() => {
+    setCurrentImageIndex((idx) => {
+      if (images.length === 0) return 0
+      return Math.min(Math.max(0, idx), images.length - 1)
+    })
+  }, [images.length])
+
+  const handleSave = async () => {
+    // Upload any staged files first (respecting 5 images max), then persist fields and order
+    let current = images.slice(0, 5)
+    if (pendingFiles.length > 0) {
+      try {
+        setUploading(true)
+        const space = Math.max(0, 5 - current.length)
+        const filesToUpload = pendingFiles.slice(0, space)
+        if (filesToUpload.length) {
+          try {
+            const res = await announcementApi.uploadImages(announcement.id, filesToUpload as any)
+            // Prefer explicit returned paths to preserve local removals and ordering
+            const returnedPaths: string[] = (res as any)?.paths || []
+            if (returnedPaths?.length) {
+              const existingSet = new Set(current)
+              for (const p of returnedPaths) {
+                if (existingSet.has(p)) continue
+                current.push(p)
+                existingSet.add(p)
+                if (current.length >= 5) break
+              }
+            } else {
+              // Fallback: merge using server announcement images if paths missing
+              const updated = (res as any)?.announcement?.images || (res as any)?.images || null
+              if (Array.isArray(updated)) {
+                const set = new Set(current)
+                for (const p of updated) {
+                  if (!set.has(p)) current.push(p)
+                  if (current.length >= 5) break
+                }
+              }
+            }
+          } catch {
+            alert('Failed to upload images. Please try again.')
+          }
+        }
+        setImages(current)
+        setPendingFiles([])
+      } finally {
+        setUploading(false)
+      }
+    }
+    // Persist fields and final image order (including removals/reorders)
+    await onUpdate(announcement.id, { ...formData, images: current })
   }
 
   const handleDelete = () => {
@@ -303,18 +364,8 @@ function AnnouncementDetailModal({
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">
-              {editMode ? 'Edit Announcement' : 'Announcement Details'}
-            </h2>
+            <h2 className="text-xl font-semibold text-gray-900">Edit Announcement</h2>
             <div className="flex items-center space-x-2">
-              {!editMode && (
-                <button
-                  onClick={() => setEditMode(true)}
-                  className="px-3 py-1 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-                >
-                  Edit
-                </button>
-              )}
               <button
                 onClick={onClose}
                 className="text-gray-400 hover:text-gray-600"
@@ -332,36 +383,68 @@ function AnnouncementDetailModal({
             <div>
               <label htmlFor="ann-images" className="block text-sm font-medium text-gray-700 mb-1">Images</label>
               {images.length > 0 && (
+                <div className="relative w-full aspect-[16/9] bg-neutral-100 rounded mb-2 overflow-hidden">
+                        <img src={mediaUrl(images[currentImageIndex]) || undefined} alt="Preview" className="w-full h-full object-contain" />
+                  {images.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        aria-label="Prev"
+                        className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2 z-10"
+                        onClick={() => setCurrentImageIndex((i) => (i - 1 + images.length) % images.length)}
+                      >
+                        ◀
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Next"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2 z-10"
+                        onClick={() => setCurrentImageIndex((i) => (i + 1) % images.length)}
+                      >
+                        ▶
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              {images.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 mb-2">
                   {images.map((img, idx) => (
-                    <img key={idx} src={mediaUrl(img)} alt="Image" className="w-full h-20 object-cover rounded border" />
+                    <div key={`${img}-${idx}`} className="relative group">
+                      <img src={mediaUrl(img) || undefined} alt="Image" className="w-full h-20 object-cover rounded border" />
+                      <button
+                        type="button"
+                        aria-label="Remove image"
+                        className="absolute -top-1 -right-1 bg-white border rounded-full p-1 shadow hidden group-hover:block"
+                        onClick={() => setImages((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                      {/* Reorder arrows removed per request */}
+                    </div>
                   ))}
                 </div>
               )}
-              <input id="ann-images" name="announcement_images" type="file" accept="image/*" onChange={async (e) => {
-                const file = e.target.files?.[0]
-                if (!file) return
-                if (images.length >= 5) return
-                try {
-                  setUploading(true)
-                  const fd = new FormData()
-                  fd.set('file', file)
-                  // Use direct client since admin api lacks helper
-                  const res = await fetch(`${(import.meta as any).env?.VITE_API_URL || 'http://localhost:5000'}/api/admin/announcements/${announcement.id}/upload`, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${localStorage.getItem('admin:access_token') || ''}` },
-                    body: fd,
-                  })
-                  const data = await res.json()
-                  if (res.ok) {
-                    const next = (data.announcement?.images || []).slice(0, 5)
-                    setImages(next)
-                  }
-                } finally {
-                  setUploading(false)
-                }
+              <input id="ann-images" name="announcement_images" type="file" accept="image/*" multiple onChange={(e) => {
+                const files = Array.from(e.target.files || [])
+                if (files.length === 0) return
+                const space = Math.max(0, 5 - images.length)
+                setPendingFiles((prev) => [...prev, ...files].slice(0, space))
+                try { (e.target as HTMLInputElement).value = '' } catch {}
               }} disabled={uploading || images.length >= 5} />
-              <p className="text-xs text-gray-500 mt-1">Upload up to 5 images.</p>
+              {pendingFiles.length > 0 && (
+                <div className="mt-2">
+                  <div className="grid grid-cols-3 gap-2 mb-1">
+                    {pendingFiles.map((f, i) => (
+                      <div key={`${f.name}-${i}`} className="relative">
+                        <img src={URL.createObjectURL(f)} alt={f.name} className="w-full h-20 object-cover rounded border" />
+                        <button type="button" className="absolute -top-2 -right-2 bg-white border rounded-full p-1 text-xs" aria-label="Remove pending image" onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-500">These will upload on Save. Max 5 images total.</p>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
@@ -418,22 +501,22 @@ function AnnouncementDetailModal({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">More details link (optional)</label>
                 {editMode ? (
-                  <select
-                    name="announcement_status"
-                    id="announcement-status"
-                    value={formData.is_active ? 'active' : 'inactive'}
-                    onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.value === 'active' }))}
+                  <input
+                    type="url"
+                    inputMode="url"
+                    placeholder="https://domain.com/..."
+                    value={formData.external_url}
+                    onChange={(e) => setFormData(prev => ({ ...prev, external_url: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-zambales-green"
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
+                  />
                 ) : (
-                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${announcement.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                    {announcement.is_active ? 'ACTIVE' : 'INACTIVE'}
-                  </span>
+                  (formData.external_url ? (
+                    <a href={formData.external_url} target="_blank" rel="noopener noreferrer" className="text-ocean-700 hover:underline break-all">Open link</a>
+                  ) : (
+                    <span className="text-gray-500">No link</span>
+                  ))
                 )}
               </div>
             </div>
@@ -455,20 +538,22 @@ function AnnouncementDetailModal({
             </button>
 
             <div className="flex items-center space-x-3">
-              {editMode && (
+              {(editMode || hasImageChanges || pendingFiles.length > 0) && (
                 <>
-                  <button
-                    onClick={() => setEditMode(false)}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-                  >
-                    Cancel
-                  </button>
+                  {editMode && (
+                    <button
+                      onClick={() => setEditMode(false)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  )}
                   <button
                     onClick={handleSave}
-                    disabled={loading || uploading || !formData.title.trim() || !formData.content.trim()}
+                    disabled={loading || uploading || (editMode && (!formData.title.trim() || !formData.content.trim()))}
                     className="px-4 py-2 text-sm font-medium text-white bg-zambales-green hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
                   >
-                    {loading ? 'Saving...' : 'Save Changes'}
+                    {(loading || uploading) ? 'Saving...' : 'Save Changes'}
                   </button>
                 </>
               )}
@@ -492,7 +577,8 @@ function CreateAnnouncementModal({ onClose, onCreate, loading }: CreateAnnouncem
   const [formData, setFormData] = useState({
     title: '',
     content: '',
-    priority: 'medium' as 'high' | 'medium' | 'low'
+    priority: 'medium' as 'high' | 'medium' | 'low',
+    external_url: ''
   })
   const [files, setFiles] = useState<File[]>([])
 
@@ -544,10 +630,14 @@ function CreateAnnouncementModal({ onClose, onCreate, loading }: CreateAnnouncem
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(e) => setFiles((prev) => {
-                  const next = [...prev, ...Array.from(e.target.files || [])]
-                  return next.slice(0, 5)
-                })}
+                onChange={(e) => {
+                  const incoming = Array.from(e.target.files || [])
+                  setFiles((prev) => {
+                    const next = [...prev, ...incoming]
+                    return next.slice(0, 5)
+                  })
+                  try { (e.target as HTMLInputElement).value = '' } catch {}
+                }}
                 className="w-full"
               />
               {files.length > 0 && (
@@ -573,6 +663,20 @@ function CreateAnnouncementModal({ onClose, onCreate, loading }: CreateAnnouncem
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-zambales-green"
                 placeholder="Enter announcement content"
                 required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">More details link (optional)</label>
+              <input
+                name="create_announcement_link"
+                id="create-announcement-link"
+                type="url"
+                inputMode="url"
+                placeholder="https://facebook.com/..."
+                value={formData.external_url}
+                onChange={(e) => setFormData(prev => ({ ...prev, external_url: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-zambales-green"
               />
             </div>
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { auditAdminApi, exportAdminApi, mediaUrl, showToast } from '../../lib/api'
+import apiClient, { auditAdminApi, exportAdminApi, mediaUrl, showToast } from '../../lib/api'
 
 export default function AuditLogs() {
   const [logs, setLogs] = useState<any[]>([])
@@ -8,6 +8,7 @@ export default function AuditLogs() {
   const [pages, setPages] = useState(1)
   const [filters, setFilters] = useState<{ entity_type?: string; actor_role?: string; action?: string; from?: string; to?: string }>({})
   const [working, setWorking] = useState('')
+  const [meta, setMeta] = useState<{ entity_types: string[]; actions: string[]; actor_roles: string[] }|null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -22,6 +23,21 @@ export default function AuditLogs() {
   }
 
   useEffect(() => { load() }, [page])
+
+  useEffect(() => {
+    let cancelled = false
+    const fetchMeta = async () => {
+      try {
+        const res = await apiClient.get('/api/admin/audit/meta')
+        const data: any = (res as any)?.data || res
+        if (!cancelled) setMeta(data)
+      } catch {
+        // ignore; fall back to free-text inputs
+      }
+    }
+    fetchMeta()
+    return () => { cancelled = true }
+  }, [])
 
   const exportIt = async (fmt: 'pdf'|'xlsx') => {
     setWorking(fmt)
@@ -41,7 +57,14 @@ export default function AuditLogs() {
       <div className="flex flex-col sm:flex-row sm:items-end gap-3">
         <div>
           <label className="block text-xs font-medium mb-1">Entity Type</label>
-          <input className="border rounded px-3 py-2 text-sm" placeholder="e.g., document_request" value={filters.entity_type||''} onChange={(e)=> setFilters(f=>({...f, entity_type: e.target.value||undefined}))} />
+          {meta?.entity_types ? (
+            <select className="border rounded px-3 py-2 text-sm" value={filters.entity_type||''} onChange={(e)=> setFilters(f=>({...f, entity_type: e.target.value||undefined}))}>
+              <option value="">Any</option>
+              {meta.entity_types.map((et)=> (<option key={et} value={et}>{et}</option>))}
+            </select>
+          ) : (
+            <input className="border rounded px-3 py-2 text-sm" placeholder="e.g., document_request" value={filters.entity_type||''} onChange={(e)=> setFilters(f=>({...f, entity_type: e.target.value||undefined}))} />
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">Actor Role</label>
@@ -54,7 +77,14 @@ export default function AuditLogs() {
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">Action</label>
-          <input className="border rounded px-3 py-2 text-sm" placeholder="e.g., status_processing" value={filters.action||''} onChange={(e)=> setFilters(f=>({...f, action: e.target.value||undefined}))} />
+          {meta?.actions ? (
+            <select className="border rounded px-3 py-2 text-sm" value={filters.action||''} onChange={(e)=> setFilters(f=>({...f, action: e.target.value||undefined}))}>
+              <option value="">Any</option>
+              {meta.actions.map((a)=> (<option key={a} value={a}>{a}</option>))}
+            </select>
+          ) : (
+            <input className="border rounded px-3 py-2 text-sm" placeholder="e.g., status_processing" value={filters.action||''} onChange={(e)=> setFilters(f=>({...f, action: e.target.value||undefined}))} />
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium mb-1">From</label>

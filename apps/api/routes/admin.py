@@ -854,6 +854,7 @@ def create_announcement():
         title = data.get('title')
         content = data.get('content')
         priority = data.get('priority', 'medium')
+        external_url = data.get('external_url')
         
         if not title or not content:
             return jsonify({'error': 'Title and content are required'}), 400
@@ -861,7 +862,7 @@ def create_announcement():
         if priority not in ['high', 'medium', 'low']:
             return jsonify({'error': 'Invalid priority level'}), 400
         
-        # Create announcement
+        # Create announcement (set external_url only if column exists)
         announcement = Announcement(
             title=title,
             content=content,
@@ -871,6 +872,15 @@ def create_announcement():
             is_active=True,
             images=[]
         )
+        try:
+            from sqlalchemy import inspect as _sa_inspect
+            insp = _sa_inspect(db.engine)
+            cols = {c['name'] for c in insp.get_columns('announcements')}
+            if 'external_url' in cols and external_url is not None:
+                announcement.external_url = external_url
+        except Exception:
+            # Fail-safe: ignore if inspector fails (older SQLite schema)
+            pass
         
         db.session.add(announcement)
         db.session.commit()
@@ -914,6 +924,16 @@ def update_announcement(announcement_id):
                 return jsonify({'error': 'Invalid priority level'}), 400
         if 'is_active' in data:
             announcement.is_active = data['is_active']
+        if 'external_url' in data:
+            try:
+                from sqlalchemy import inspect as _sa_inspect
+                insp = _sa_inspect(db.engine)
+                cols = {c['name'] for c in insp.get_columns('announcements')}
+                if 'external_url' in cols:
+                    announcement.external_url = data['external_url']
+            except Exception:
+                # Ignore when column isn't present yet
+                pass
         if 'images' in data and isinstance(data['images'], list):
             announcement.images = data['images']
         
@@ -966,6 +986,52 @@ def upload_announcement_image(announcement_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': 'Failed to upload image', 'details': str(e)}), 500
+
+
+@admin_bp.route('/announcements/<int:announcement_id>/uploads', methods=['POST'])
+@jwt_required()
+def upload_announcement_images(announcement_id):
+    """Upload multiple images for an announcement (max 5 total). Accepts multiple 'file' parts."""
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):  # Error response
+            return municipality_id
+
+        announcement = Announcement.query.get(announcement_id)
+        if not announcement:
+            return jsonify({'error': 'Announcement not found'}), 404
+        if announcement.municipality_id != municipality_id:
+            return jsonify({'error': 'Announcement not in your municipality'}), 403
+
+        if not request.files:
+            return jsonify({'error': 'No files uploaded'}), 400
+
+        # Municipality slug
+        municipality = Municipality.query.get(municipality_id)
+        municipality_slug = municipality.slug if municipality else 'unknown'
+
+        images = announcement.images or []
+        saved_paths = []
+
+        # Accept multiple 'file' fields; each key may be single or list
+        for key in request.files:
+            files = request.files.getlist(key)
+            for f in files:
+                if len(images) >= 5:
+                    break
+                rel_path = save_announcement_image(f, announcement_id, municipality_slug)
+                images.append(rel_path)
+                saved_paths.append(rel_path)
+            if len(images) >= 5:
+                break
+
+        announcement.images = images
+        db.session.commit()
+
+        return jsonify({'message': 'Images uploaded', 'paths': saved_paths, 'announcement': announcement.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to upload images', 'details': str(e)}), 500
 
 @admin_bp.route('/announcements/<int:announcement_id>', methods=['DELETE'])
 @jwt_required()
@@ -1251,11 +1317,51 @@ def admin_list_transfers():
         municipality_id = require_admin_municipality()
         if isinstance(municipality_id, tuple):
             return municipality_id
-        # Show outgoing (from this municipality) and incoming (to this municipality)
-        rows = TransferRequest.query.filter(
+
+        status = (request.args.get('status') or '').strip().lower() or None
+        q = (request.args.get('q') or '').strip() or None
+        page = request.args.get('page', type=int) or 1
+        per_page = min(request.args.get('per_page', type=int) or 20, 100)
+        sort = (request.args.get('sort') or 'created_at').strip()
+        order = (request.args.get('order') or 'desc').strip()
+
+        base = TransferRequest.query.filter(
             or_(TransferRequest.from_municipality_id == municipality_id, TransferRequest.to_municipality_id == municipality_id)
-        ).order_by(TransferRequest.created_at.desc()).all()
-        return jsonify({'transfers': [t.to_dict() for t in rows], 'count': len(rows)}), 200
+        )
+        if status:
+            base = base.filter(TransferRequest.status == status)
+
+        if q:
+            try:
+                base = base.join(User, User.id == TransferRequest.user_id).filter(
+                    or_(
+                        func.lower(func.trim((User.first_name + ' ' + User.last_name))).like(f"%{q.lower()}%"),
+                        func.lower(User.email).like(f"%{q.lower()}%"),
+                        func.cast(TransferRequest.id, db.String).like(f"%{q}%")
+                    )
+                )
+            except Exception:
+                pass
+
+        # Sorting
+        sort_col = TransferRequest.status if sort == 'status' else TransferRequest.created_at
+        base = base.order_by(sort_col.asc() if order == 'asc' else sort_col.desc())
+
+        p = base.paginate(page=page, per_page=per_page, error_out=False)
+        items = []
+        for t in p.items:
+            d = t.to_dict()
+            try:
+                u = User.query.get(t.user_id)
+                if u:
+                    d['resident_name'] = (f"{getattr(u,'first_name','') or ''} {getattr(u,'last_name','') or ''}").strip() or getattr(u,'username', None) or getattr(u,'email', None)
+                    d['email'] = getattr(u, 'email', None)
+                    d['phone'] = getattr(u, 'phone_number', None)
+            except Exception:
+                pass
+            items.append(d)
+
+        return jsonify({'transfers': items, 'page': p.page, 'pages': p.pages, 'per_page': p.per_page, 'total': p.total}), 200
     except Exception as e:
         return jsonify({'error': 'Failed to get transfer requests', 'details': str(e)}), 500
 
@@ -1274,6 +1380,7 @@ def admin_update_transfer(transfer_id: int):
             return jsonify({'error': 'Transfer request not found'}), 404
 
         now = datetime.utcnow()
+        prev_status = (t.status or 'pending').lower()
         if new_status == 'approved':
             if t.from_municipality_id != municipality_id:
                 return jsonify({'error': 'Only current municipality can approve'}), 403
@@ -1302,6 +1409,26 @@ def admin_update_transfer(transfer_id: int):
             return jsonify({'error': 'Invalid status'}), 400
         t.updated_at = now
         db.session.commit()
+        # Audit (best-effort)
+        try:
+            action_map = {
+                'approved': 'approve_transfer',
+                'rejected': 'deny_transfer',
+                'accepted': 'accept_transfer',
+            }
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=municipality_id,
+                entity_type='transfer_request',
+                entity_id=t.id,
+                action=action_map.get(new_status, f'status_{new_status}'),
+                actor_role='admin',
+                old_values={'status': prev_status},
+                new_values={'status': new_status},
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
         return jsonify({'message': 'Transfer updated', 'transfer': t.to_dict()}), 200
     except Exception as e:
         db.session.rollback()
@@ -2278,6 +2405,25 @@ def admin_list_audit():
         return jsonify({'logs': [l.to_dict() for l in p.items], 'page': p.page, 'pages': p.pages, 'per_page': p.per_page, 'total': p.total}), 200
     except Exception as e:
         return jsonify({'error': 'Failed to list audit logs', 'details': str(e)}), 500
+
+
+# Admin Audit Meta (distinct filters)
+@admin_bp.route('/audit/meta', methods=['GET'])
+@jwt_required()
+def admin_audit_meta():
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+        # Distinct entity types and actions scoped to municipality
+        et_rows = db.session.query(AuditLog.entity_type).filter(AuditLog.municipality_id == municipality_id).distinct().all()
+        ac_rows = db.session.query(AuditLog.action).filter(AuditLog.municipality_id == municipality_id).distinct().all()
+        entity_types = [r[0] for r in et_rows if r and r[0]]
+        actions = [r[0] for r in ac_rows if r and r[0]]
+        roles = ['admin', 'resident', 'system']
+        return jsonify({'entity_types': entity_types, 'actions': actions, 'actor_roles': roles}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to load audit meta', 'details': str(e)}), 500
 
 
 # Admin Export endpoints (generic handler)

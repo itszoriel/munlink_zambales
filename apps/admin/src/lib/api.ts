@@ -276,6 +276,7 @@ export const announcementApi = {
     title: string
     content: string
     priority: 'high' | 'medium' | 'low'
+    external_url?: string
   }): Promise<ApiResponse> =>
     apiClient.post('/api/admin/announcements', data).then(res => res.data),
 
@@ -288,12 +289,24 @@ export const announcementApi = {
     }).then(res => res.data)
   },
 
+  // Upload multiple images (batch)
+  uploadImages: (id: number, files: File[]): Promise<ApiResponse<{ paths: string[]; announcement: any }>> => {
+    const form = new FormData()
+    // Use repeated 'file' parts to match backend getlist handling
+    files.forEach((f) => form.append('file', f))
+    return apiClient.post(`/api/admin/announcements/${id}/uploads`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(res => res.data)
+  },
+
   // Update announcement
   updateAnnouncement: (id: number, data: {
     title?: string
     content?: string
     priority?: 'high' | 'medium' | 'low'
     is_active?: boolean
+    images?: string[]
+    external_url?: string
   }): Promise<ApiResponse> =>
     apiClient.put(`/api/admin/announcements/${id}`, data).then(res => res.data),
 
@@ -354,8 +367,8 @@ export const dashboardApi = {
 
 // Transfers (Resident Municipality Transfers)
 export const transferAdminApi = {
-  list: (): Promise<ApiResponse<{ transfers: any[]; count: number }>> =>
-    apiClient.get('/api/admin/transfers').then(res => res.data),
+  list: (params: { status?: string; q?: string; page?: number; per_page?: number; sort?: string; order?: 'asc'|'desc' } = {}): Promise<ApiResponse<{ transfers: any[]; count?: number; page?: number; pages?: number; per_page?: number; total?: number }>> =>
+    apiClient.get('/api/admin/transfers', { params }).then(res => res.data),
   updateStatus: (id: number, status: 'approved' | 'rejected' | 'accepted'): Promise<ApiResponse<{ transfer: any }>> =>
     apiClient.put(`/api/admin/transfers/${id}/status`, { status }).then(res => res.data),
 }

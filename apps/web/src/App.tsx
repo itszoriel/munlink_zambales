@@ -23,6 +23,8 @@ import UploadIdPage from './pages/UploadIdPage'
 import ErrorBoundary from './components/ErrorBoundary'
 import ProfilePage from './pages/ProfilePage'
 import MyMarketplacePage from './pages/MyMarketplacePage'
+import MarketplaceItemPage from './pages/MarketplaceItemPage'
+import AnnouncementDetailPage from './pages/AnnouncementDetailPage'
 
 function App() {
   const setAuth = useAppStore((s) => s.setAuth)
@@ -55,6 +57,7 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="announcements" element={<AnnouncementsPage />} />
+          <Route path="announcements/:id" element={<AnnouncementDetailPage />} />
           <Route path="login" element={<LoginPage />} />
           <Route path="register" element={<ErrorBoundary><RegisterPage /></ErrorBoundary>} />
           <Route path="verify-email" element={<VerifyEmailPage />} />
@@ -63,6 +66,7 @@ function App() {
           <Route path="profile" element={<ProtectedRoute allow={["resident"]}><ProfilePage /></ProtectedRoute>} />
           <Route path="my-marketplace" element={<ProtectedRoute allow={["resident"]}><MyMarketplacePage /></ProtectedRoute>} />
           <Route path="marketplace" element={<MarketplacePage />} />
+          <Route path="marketplace/:id" element={<MarketplaceItemPage />} />
           <Route path="about" element={<About />} />
           <Route path="documents" element={<ProtectedRoute allow={["resident","admin","public"]}><DocumentsPage /></ProtectedRoute>} />
           <Route path="documents/requests/:id" element={<LegacyDocRedirect />} />

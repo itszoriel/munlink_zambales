@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { X } from 'lucide-react'
 import GatedAction from '@/components/GatedAction'
 import { marketplaceApi, mediaUrl, showToast } from '@/lib/api'
@@ -130,9 +131,13 @@ export default function MarketplacePage() {
           {items.map((item) => (
             <div key={item.id} className="card">
               <div className="w-full aspect-[4/3] bg-gray-200 rounded-lg mb-4 overflow-hidden relative">
-                {item.images?.[0] && (
-                  <img src={mediaUrl(item.images[0])} alt={item.title} loading="lazy" className="responsive-img h-full" />
-                )}
+                <Link to={`/marketplace/${item.id}`} aria-label={`View ${item.title}`} className="absolute inset-0">
+                  {item.images?.[0] ? (
+                    <img src={mediaUrl(item.images[0])} alt={item.title} loading="lazy" className="responsive-img h-full" />
+                  ) : (
+                    <div className="w-full h-full" />
+                  )}
+                </Link>
                 <div className="absolute top-3 left-3 flex items-center gap-2">
                   <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-white/90 text-neutral-800 shadow">{(item as any).municipality_name || (selectedMunicipality as any)?.name || 'Province-wide'}</span>
                 </div>
@@ -145,8 +150,11 @@ export default function MarketplacePage() {
                         : 'bg-sunset-600 text-white'
                   }`}>{item.transaction_type}</span>
                 </div>
+                <div className="absolute bottom-3 right-3">
+                  <Link to={`/marketplace/${item.id}`} className="px-2.5 py-1 rounded-lg text-xs bg-white/90 hover:bg-white shadow">View</Link>
+                </div>
               </div>
-              <h3 className="font-bold mb-2">{item.title}</h3>
+              <h3 className="font-bold mb-2"><Link to={`/marketplace/${item.id}`} className="hover:underline">{item.title}</Link></h3>
               <p className="text-sm text-gray-600 mb-2">Category: {item.category}</p>
               {(() => {
                 const u = (item as any).user
