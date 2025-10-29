@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { handleApiError, dashboardApi, userApi, marketplaceApi, announcementApi, documentsAdminApi, municipalitiesAdminApi } from '../lib/api'
+import { handleApiError, dashboardApi, userApi, marketplaceApi, announcementApi, documentsAdminApi } from '../lib/api'
+import ExportArchive from '../components/reports/ExportArchive.tsx'
+import AuditLogs from '../components/reports/AuditLogs.tsx'
 
 export default function Reports() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<any>(null)
   const [range, setRange] = useState<string>('last_30_days')
-  const [selectedMunicipality, setSelectedMunicipality] = useState<any | null>(null)
-  const [showMuniModal, setShowMuniModal] = useState(false)
+  
+  const [tab, setTab] = useState<'overview'|'export'|'audit'>('overview')
 
   useEffect(() => {
     let mounted = true
@@ -15,13 +17,12 @@ export default function Reports() {
       try {
         setError(null)
         setLoading(true)
-        const [dashRes, userRes, marketRes, annRes, docsRes, muniRes, growthRes] = await Promise.allSettled([
+        const [dashRes, userRes, marketRes, annRes, docsRes, growthRes] = await Promise.allSettled([
           dashboardApi.getDashboardStats(),
           userApi.getUserStats(),
           marketplaceApi.getMarketplaceStats(),
           announcementApi.getAnnouncementStats(),
           documentsAdminApi.getStats(range),
-          municipalitiesAdminApi.getPerformance(range),
           dashboardApi.getUserGrowth(range),
         ])
 
@@ -30,10 +31,9 @@ export default function Reports() {
         const marketplace = marketRes.status === 'fulfilled' ? ((marketRes.value as any).data || marketRes.value) : undefined
         const announcements = annRes.status === 'fulfilled' ? ((annRes.value as any).data || annRes.value) : undefined
         const documents = docsRes.status === 'fulfilled' ? ((docsRes.value as any).data || docsRes.value) : undefined
-        const municipalities = muniRes.status === 'fulfilled' ? (((muniRes.value as any).data || muniRes.value)?.municipalities) : undefined
-
+        
         const usersGrowth = growthRes.status === 'fulfilled' ? ((growthRes.value as any).data || growthRes.value) : undefined
-        if (mounted) setReport({ dashboard, users, marketplace, announcements, documents, municipalities, usersGrowth })
+        if (mounted) setReport({ dashboard, users, marketplace, announcements, documents, usersGrowth })
       } catch (e: any) {
         setError(handleApiError(e))
       } finally {
@@ -53,7 +53,7 @@ export default function Reports() {
 
   const documents = (report?.documents?.top_requested as any[]) || []
 
-  const municipalities = (report?.municipalities as any[]) || []
+  
   const growth = ((report as any)?.usersGrowth?.series as any[]) || []
 
   return (
@@ -70,14 +70,16 @@ export default function Reports() {
             <option value="last_90_days">Last 90 days</option>
             <option value="this_year">This Year</option>
           </select>
-          <button className="w-full sm:w-auto px-6 py-3 bg-ocean-gradient hover:scale-105 text-white rounded-xl font-semibold transition-all shadow-lg flex items-center justify-center gap-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-            Export Report
-          </button>
         </div>
       </div>
 
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 text-red-700 px-3 py-2 text-sm">{error}</div>}
+
+      <div className="mb-6 inline-flex rounded-xl border overflow-hidden">
+        {(['overview','export','audit'] as const).map((t) => (
+          <button key={t} onClick={()=> setTab(t)} className={`px-4 py-2 text-sm ${tab===t?'bg-ocean-600 text-white':'bg-white hover:bg-neutral-50'}`}>{t==='overview'?'Overview':t==='export'?'Export & Archive':'Audit Logs'}</button>
+        ))}
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-8">
         {(loading ? [...Array(4)] : metrics).map((metric: any, i: number) => (
           <div key={i} className="bg-white/70 backdrop-blur-xl rounded-2xl p-6 border border-white/50 shadow-lg hover:scale-105 transition-transform">
@@ -101,6 +103,7 @@ export default function Reports() {
         ))}
       </div>
 
+      {tab==='overview' && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="overflow-hidden rounded-3xl shadow-xl border border-white/50 bg-gradient-to-br from-ocean-600 via-ocean-500 to-forest-600">
           <div className="px-6 py-5 border-b border-white/20">
@@ -181,6 +184,7 @@ export default function Reports() {
           </div>
         </div>
       </div>
+      )}
 
       <div className="bg-white/70 backdrop-blur-xl rounded-3xl shadow-xl border border-white/50 overflow-hidden mb-8">
         <div className="px-6 py-5 border-b border-neutral-200"><h2 className="text-xl font-bold text-neutral-900">Document Requests</h2><p className="text-sm text-neutral-600 mt-1">Most requested documents</p></div>
@@ -204,57 +208,15 @@ export default function Reports() {
         </div>
       </div>
 
-      <div className="bg-white/70 backdrop-blur-xl rounded-3xl shadow-xl border border-white/50 overflow-hidden">
-        <div className="px-6 py-5 border-b border-neutral-200"><h2 className="text-xl font-bold text-neutral-900">Municipality Performance</h2><p className="text-sm text-neutral-600 mt-1">Activity comparison across municipalities</p></div>
-        <div className="p-6 space-y-4">
-          {loading ? (
-            [...Array(3)].map((_,i)=> (<div key={i} className="h-24 skeleton rounded-2xl" />))
-          ) : municipalities.length === 0 ? (
-            <div className="text-sm text-neutral-600">No data available.</div>
-          ) : (
-            municipalities.map((m: any) => (
-              <div key={m.name} className="p-4 bg-neutral-50 rounded-2xl hover:bg-ocean-50 transition-colors">
-                <div className="flex items-center justify-between mb-3"><h3 className="font-bold text-neutral-900">{m.name}</h3><button className="text-sm text-ocean-600 hover:text-ocean-700 font-medium" onClick={() => { setSelectedMunicipality(m); setShowMuniModal(true) }}>View Details →</button></div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div><p className="text-xs text-neutral-600 mb-1">Users</p><p className="text-xl font-bold text-neutral-900">{m.users}</p></div>
-                  <div><p className="text-xs text-neutral-600 mb-1">Listings</p><p className="text-xl font-bold text-neutral-900">{m.listings}</p></div>
-                  <div><p className="text-xs text-neutral-600 mb-1">Documents</p><p className="text-xl font-bold text-neutral-900">{m.documents}</p></div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {showMuniModal && selectedMunicipality && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setShowMuniModal(false) }}>
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowMuniModal(false)} />
-          <div className="relative bg-white w-[92%] max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl border p-6" tabIndex={-1} autoFocus>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-neutral-900">{selectedMunicipality.name} • Performance</h3>
-              <button className="text-neutral-500 hover:text-neutral-700" onClick={() => setShowMuniModal(false)} aria-label="Close">✕</button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="rounded-xl border p-4 bg-neutral-50">
-                <div className="text-xs text-neutral-600 mb-1">Users</div>
-                <div className="text-2xl font-bold text-neutral-900">{selectedMunicipality.users}</div>
-              </div>
-              <div className="rounded-xl border p-4 bg-neutral-50">
-                <div className="text-xs text-neutral-600 mb-1">Listings</div>
-                <div className="text-2xl font-bold text-neutral-900">{selectedMunicipality.listings}</div>
-              </div>
-              <div className="rounded-xl border p-4 bg-neutral-50">
-                <div className="text-xs text-neutral-600 mb-1">Documents</div>
-                <div className="text-2xl font-bold text-neutral-900">{selectedMunicipality.documents}</div>
-              </div>
-            </div>
-            <div className="mt-6 text-sm text-neutral-600">Range: {range.replaceAll('_', ' ')}</div>
-            <div className="mt-4 flex items-center justify-end">
-              <button className="px-4 py-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm" onClick={() => setShowMuniModal(false)}>Close</button>
-            </div>
-          </div>
-        </div>
+      
+      {tab==='export' && (
+        <ExportArchive defaultRange={range} onRangeChange={setRange} />
       )}
+      {tab==='audit' && (
+        <AuditLogs />
+      )}
+
+      
     </div>
   )
 }

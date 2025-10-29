@@ -472,11 +472,28 @@ export const documentsAdminApi = {
     apiClient.put(`/api/admin/documents/requests/${id}/content`, data).then(res => res.data),
   readyForPickup: (id: number, window?: { window_start?: string; window_end?: string }): Promise<ApiResponse<{ claim: { qr_path: string; code_masked: string; window_start?: string; window_end?: string; token: string }, request: any }>> =>
     apiClient.post(`/api/admin/documents/requests/${id}/ready-for-pickup`, window || {}).then(res => res.data),
+  claimToken: (id: number, window?: { window_start?: string; window_end?: string }): Promise<ApiResponse<{ claim: { qr_path: string; code_masked: string; window_start?: string; window_end?: string; token: string }, request: any }>> =>
+    apiClient.post(`/api/admin/documents/requests/${id}/claim-token`, window || {}).then(res => res.data),
   verifyClaim: (payload: { token?: string; code?: string; request_id?: number }): Promise<ApiResponse<{ ok: boolean; request?: any }>> =>
     apiClient.post('/api/admin/claim/verify', payload).then(res => res.data),
 }
 
 export const municipalitiesAdminApi = {
-  getPerformance: (range: string = 'last_30_days'): Promise<ApiResponse<{ municipalities: Array<{ id: number; name: string; users: number; listings: number; documents: number }> }>> =>
+  getPerformance: (range: string = 'last_30_days'): Promise<ApiResponse<{ municipalities: Array<{ id: number; name: string; users: number; listings: number; documents: number; benefits_active?: number; disputes?: number }> }>> =>
     apiClient.get('/api/admin/municipalities/performance', { params: { range } }).then(res => res.data),
+}
+
+// Admin Exports & Audit
+export const exportAdminApi = {
+  exportPdf: (entity: 'users'|'benefits'|'requests'|'issues'|'items'|'announcements'|'audit', filters?: any): Promise<ApiResponse<{ url: string; summary?: any }>> =>
+    apiClient.post(`/api/admin/exports/${entity}.pdf`, filters || {}).then(res => res.data),
+  exportExcel: (entity: 'users'|'benefits'|'requests'|'issues'|'items'|'announcements'|'audit', filters?: any): Promise<ApiResponse<{ url: string; summary?: any }>> =>
+    apiClient.post(`/api/admin/exports/${entity}.xlsx`, filters || {}).then(res => res.data),
+  cleanup: (payload: { entity: 'announcements'|'requests'|'users'|'benefits'|'issues'|'items'; before?: string; confirm: 'DELETE'; archive?: boolean }): Promise<ApiResponse<{ deleted_count: number; archived_url?: string }>> =>
+    apiClient.post('/api/admin/cleanup', payload).then(res => res.data),
+}
+
+export const auditAdminApi = {
+  list: (params: { entity_type?: string; entity_id?: number; actor_role?: string; action?: string; from?: string; to?: string; page?: number; per_page?: number } = {}): Promise<ApiResponse<{ logs: any[]; page: number; pages: number; per_page: number; total: number }>> =>
+    apiClient.get('/api/admin/audit', { params }).then(res => res.data),
 }

@@ -23,6 +23,8 @@ from apps.api.models.transfer import TransferRequest
 from apps.api.utils.file_handler import save_announcement_image
 from apps.api.utils.validators import ValidationError
 from apps.api.utils.email_sender import send_user_status_email, send_document_request_status_email
+from apps.api.models.audit import AuditLog
+from apps.api.utils.audit import log_action as log_generic_action
 from apps.api.utils.qr_utils import (
     generate_pickup_code,
     hash_code,
@@ -1356,6 +1358,23 @@ def admin_update_benefit_application_status(application_id: int):
             pass
         db.session.commit()
 
+        # Generic audit log (best-effort)
+        try:
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=getattr(program, 'municipality_id', None) or get_admin_municipality_id() or 0,
+                entity_type='benefit_application',
+                entity_id=getattr(app, 'id', None),
+                action=f'status_{new_status}',
+                actor_role='admin',
+                old_values={'status': prev},
+                new_values={'status': new_status},
+                notes=notes,
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
         # Email notifications (best-effort)
         try:
             user = User.query.get(app.user_id)
@@ -1669,9 +1688,26 @@ def generate_document_request_pdf(request_id: int):
         abs_path, rel_path = generate_document_pdf(req, doc_type, user, admin_user=admin_user)
 
         req.document_file = rel_path
+        # Retain existing behavior for digital requests: set ready after generation,
+        # but defer final completion to an explicit action.
         req.status = 'ready'
         req.ready_at = datetime.utcnow()
         req.updated_at = datetime.utcnow()
+        # Audit (best-effort)
+        try:
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=req.municipality_id,
+                entity_type='document_request',
+                entity_id=req.id,
+                action='generate_pdf',
+                actor_role='admin',
+                old_values=None,
+                new_values={'document_file': rel_path},
+                notes=None,
+            )
+        except Exception:
+            pass
         db.session.commit()
 
         return jsonify({'message': 'Document generated', 'url': f"/uploads/{rel_path}", 'request': req.to_dict()}), 200
@@ -1717,7 +1753,7 @@ def update_document_request_status(request_id: int):
         notes = data.get('admin_notes')
         rejection_reason = data.get('rejection_reason')
 
-        if new_status not in ['pending', 'processing', 'ready', 'completed', 'picked_up', 'rejected', 'cancelled']:
+        if new_status not in ['pending', 'approved', 'processing', 'ready', 'completed', 'picked_up', 'rejected', 'cancelled']:
             return jsonify({'error': 'Invalid status'}), 400
 
         req = DocumentRequest.query.get(request_id)
@@ -1726,15 +1762,16 @@ def update_document_request_status(request_id: int):
         if req.municipality_id != municipality_id:
             return jsonify({'error': 'Request not in your municipality'}), 403
 
-        # Simple transition guardrails
+        # Simple transition guardrails (with approved step)
         current = (req.status or 'pending').lower()
         # Idempotent: if status is the same, no-op success
         if new_status == current:
             return jsonify({'message': 'Status unchanged', 'request': req.to_dict()}), 200
         # Allow picked_up for physical pickup handover; completed for digital delivery
         allowed = {
-            'pending': {'processing', 'rejected', 'cancelled'},
-            'processing': {'ready', 'rejected', 'cancelled'},
+            'pending': {'approved', 'rejected', 'cancelled'},
+            'approved': {'processing', 'rejected', 'cancelled'},
+            'processing': {'ready', 'completed', 'rejected', 'cancelled'},
             'ready': {'completed', 'picked_up', 'rejected', 'cancelled'},
             'completed': set(),
             'picked_up': set(),
@@ -1751,7 +1788,7 @@ def update_document_request_status(request_id: int):
         if new_status == 'rejected' and rejection_reason:
             req.rejection_reason = rejection_reason
         now = datetime.utcnow()
-        if new_status == 'processing':
+        if new_status == 'approved':
             req.approved_at = now
         if new_status == 'ready':
             req.ready_at = now
@@ -1759,6 +1796,32 @@ def update_document_request_status(request_id: int):
             req.completed_at = now
         req.updated_at = now
         db.session.commit()
+
+        # Audit for status transitions (best-effort)
+        try:
+            action_map = {
+                'approved': 'approve',
+                'processing': 'start_processing',
+                'ready': 'mark_ready',
+                'completed': 'mark_completed',
+                'picked_up': 'mark_picked_up',
+                'rejected': 'reject',
+                'cancelled': 'cancel',
+            }
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=req.municipality_id,
+                entity_type='document_request',
+                entity_id=req.id,
+                action=action_map.get(new_status, f'status_{new_status}'),
+                actor_role='admin',
+                old_values={'status': prev_status},
+                new_values={'status': new_status},
+                notes=notes or rejection_reason,
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
         # Email notifications (best-effort)
         try:
@@ -1792,10 +1855,76 @@ def update_document_request_status(request_id: int):
 @admin_bp.route('/documents/requests/<int:request_id>/ready-for-pickup', methods=['POST'])
 @jwt_required()
 def admin_ready_for_pickup(request_id: int):
-    """Generate a claim ticket and mark a physical request as ready.
+    """Mark a physical request as ready for pickup.
 
-    Reuses qr_code (PNG relative path) and qr_data (JSON payload) fields.
+    Claim token/QR generation is handled separately via /claim-token.
     """
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+
+        req = DocumentRequest.query.get(request_id)
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
+        if req.municipality_id != municipality_id:
+            return jsonify({'error': 'Request not in your municipality'}), 403
+
+        # Only for pickup/physical requests
+        if (req.delivery_method or '').lower() not in ('physical', 'pickup'):
+            return jsonify({'error': 'Only pickup requests can be marked ready-for-pickup'}), 400
+
+        # Only update status to ready
+        req.status = 'ready'
+        req.ready_at = datetime.utcnow()
+        req.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        # Audit and best-effort notify resident via email
+        try:
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=req.municipality_id,
+                entity_type='document_request',
+                entity_id=req.id,
+                action='mark_ready',
+                actor_role='admin',
+                old_values=None,
+                new_values={'status': 'ready'},
+                notes=None,
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        try:
+            user = User.query.get(req.user_id)
+            doc_type = DocumentType.query.get(req.document_type_id)
+            if user and getattr(user, 'email', None):
+                # Reuse existing email helper with a simple message
+                send_user_status_email(user.email, approved=True)
+        except Exception:
+            pass
+
+        return jsonify({
+            'message': 'Marked ready for pickup',
+            'claim': {
+                'qr_path': f"/uploads/{str(req.qr_code).replace('\\','/')}" if req.qr_code else None,
+                'code_masked': (req.qr_data or {}).get('code_masked'),
+                'window_start': (req.qr_data or {}).get('window_start'),
+                'window_end': (req.qr_data or {}).get('window_end'),
+                'token': (req.qr_data or {}).get('token'),
+            },
+            'request': req.to_dict(include_user=True)
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to set ready for pickup', 'details': str(e)}), 500
+
+
+@admin_bp.route('/documents/requests/<int:request_id>/claim-token', methods=['POST'])
+@jwt_required()
+def admin_generate_claim_token(request_id: int):
+    """Generate a claim token/QR for a pickup request without changing status."""
     try:
         municipality_id = require_admin_municipality()
         if isinstance(municipality_id, tuple):
@@ -1810,10 +1939,8 @@ def admin_ready_for_pickup(request_id: int):
             return jsonify({'error': 'Request not found'}), 404
         if req.municipality_id != municipality_id:
             return jsonify({'error': 'Request not in your municipality'}), 403
-
-        # Only for pickup/physical requests
         if (req.delivery_method or '').lower() not in ('physical', 'pickup'):
-            return jsonify({'error': 'Only pickup requests can be marked ready-for-pickup'}), 400
+            return jsonify({'error': 'Only pickup requests support claim tokens'}), 400
 
         # Generate code and token
         code = generate_pickup_code()
@@ -1838,30 +1965,35 @@ def admin_ready_for_pickup(request_id: int):
         req.qr_data = {
             'token': token_info['token'],
             'jti': token_info['jti'],
-            'exp': token_info['exp'],
+            'exp': token_info.get('exp'),
             'code_hash': code_h.decode('utf-8', errors='ignore') if isinstance(code_h, (bytes, bytearray)) else str(code_h),
             'code_enc': encrypt_code(code),
             'code_masked': masked(code),
             'window_start': window_start,
             'window_end': window_end,
         }
-        req.status = 'ready'
-        req.ready_at = datetime.utcnow()
         req.updated_at = datetime.utcnow()
         db.session.commit()
 
-        # Best-effort notify resident via email
+        # Audit
         try:
-            user = User.query.get(req.user_id)
-            doc_type = DocumentType.query.get(req.document_type_id)
-            if user and getattr(user, 'email', None):
-                # Reuse existing email helper with a simple message
-                send_user_status_email(user.email, approved=True)
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=req.municipality_id,
+                entity_type='document_request',
+                entity_id=req.id,
+                action='generate_claim_token',
+                actor_role='admin',
+                old_values=None,
+                new_values={'qr_code': req.qr_code, 'code_masked': (req.qr_data or {}).get('code_masked')},
+                notes=None,
+            )
+            db.session.commit()
         except Exception:
-            pass
+            db.session.rollback()
 
         return jsonify({
-            'message': 'Ready for pickup and claim ticket generated',
+            'message': 'Claim token generated',
             'claim': {
                 'qr_path': f"/uploads/{rel_png}",
                 'code_masked': req.qr_data.get('code_masked'),
@@ -1873,8 +2005,7 @@ def admin_ready_for_pickup(request_id: int):
         }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': 'Failed to set ready for pickup', 'details': str(e)}), 500
-
+        return jsonify({'error': 'Failed to generate claim token', 'details': str(e)}), 500
 
 @admin_bp.route('/claim/verify', methods=['POST'])
 @jwt_required()
@@ -1991,6 +2122,23 @@ def update_document_request_content(request_id: int):
         req.updated_at = datetime.utcnow()
         db.session.commit()
 
+        # Audit (best-effort)
+        try:
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=req.municipality_id,
+                entity_type='document_request',
+                entity_id=req.id,
+                action='edit_content',
+                actor_role='admin',
+                old_values=None,
+                new_values={k: updates.get(k) for k in ['purpose','remarks','civil_status','age'] if k in updates},
+                notes=None,
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
         return jsonify({'message': 'Content updated', 'request': req.to_dict(include_user=True, include_audit=True)}), 200
     except Exception as e:
         db.session.rollback()
@@ -2013,11 +2161,21 @@ def admin_municipality_performance():
         start, end = _parse_range(range_param)
 
         def build_perf(m_id: int):
-            users = User.query.filter(and_(User.municipality_id == m_id)).count()
+            users = User.query.filter(and_(User.municipality_id == m_id, User.role == 'resident', User.admin_verified == True, User.is_active == True)).count()
             listings = MarketplaceItem.query.filter(and_(MarketplaceItem.municipality_id == m_id, MarketplaceItem.created_at >= start, MarketplaceItem.created_at <= end)).count()
             docs = DocumentRequest.query.filter(and_(DocumentRequest.municipality_id == m_id, DocumentRequest.created_at >= start, DocumentRequest.created_at <= end)).count()
+            benefits_active = 0
+            disputes_opened = 0
+            try:
+                benefits_active = BenefitProgram.query.filter(and_(BenefitProgram.municipality_id == m_id, BenefitProgram.is_active == True)).count()
+            except Exception:
+                pass
+            try:
+                disputes_opened = MarketplaceTransaction.query.filter(and_(MarketplaceTransaction.status == 'disputed', MarketplaceTransaction.created_at >= start, MarketplaceTransaction.created_at <= end)).count()
+            except Exception:
+                pass
             name = (Municipality.query.get(m_id).name if Municipality.query.get(m_id) else f"Municipality {m_id}")
-            return {'id': m_id, 'name': name, 'users': users, 'listings': listings, 'documents': docs}
+            return {'id': m_id, 'name': name, 'users': users, 'listings': listings, 'documents': docs, 'benefits_active': benefits_active, 'disputes': disputes_opened}
 
         if role == 'admin':
             # Province-level: return top N municipalities by activity
@@ -2076,6 +2234,232 @@ def admin_list_transactions():
         return jsonify({'transactions': rows, 'total': p.total, 'page': p.page, 'pages': p.pages, 'per_page': p.per_page}), 200
     except Exception as e:
         return jsonify({'error': 'Failed to list transactions', 'details': str(e)}), 500
+
+
+# Admin Audit Log Listing
+@admin_bp.route('/audit', methods=['GET'])
+@jwt_required()
+def admin_list_audit():
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+        q = AuditLog.query.filter(AuditLog.municipality_id == municipality_id)
+        entity_type = request.args.get('entity_type')
+        entity_id = request.args.get('entity_id')
+        actor_role = request.args.get('actor_role')
+        action = request.args.get('action')
+        from_date = request.args.get('from')
+        to_date = request.args.get('to')
+        if entity_type:
+            q = q.filter(AuditLog.entity_type == entity_type)
+        if entity_id:
+            try:
+                q = q.filter(AuditLog.entity_id == int(entity_id))
+            except Exception:
+                pass
+        if actor_role:
+            q = q.filter(AuditLog.actor_role == actor_role)
+        if action:
+            q = q.filter(AuditLog.action == action)
+        if from_date:
+            try:
+                q = q.filter(AuditLog.created_at >= datetime.fromisoformat(from_date))
+            except Exception:
+                pass
+        if to_date:
+            try:
+                q = q.filter(AuditLog.created_at <= datetime.fromisoformat(to_date))
+            except Exception:
+                pass
+        page = int(request.args.get('page', 1))
+        per_page = min(100, int(request.args.get('per_page', 20)))
+        p = q.order_by(AuditLog.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+        return jsonify({'logs': [l.to_dict() for l in p.items], 'page': p.page, 'pages': p.pages, 'per_page': p.per_page, 'total': p.total}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to list audit logs', 'details': str(e)}), 500
+
+
+# Admin Export endpoints (generic handler)
+@admin_bp.route('/exports/<string:entity>.<string:fmt>', methods=['POST'])
+@jwt_required()
+def admin_export_entity(entity: str, fmt: str):
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+        # Resolve municipality name/slug
+        muni = Municipality.query.get(municipality_id)
+        municipality_name = getattr(muni, 'name', 'Municipality')
+        muni_slug = getattr(muni, 'slug', str(municipality_id))
+
+        filters = request.get_json(silent=True) or {}
+        range_param = filters.get('range')
+        start, end = _parse_range(range_param or 'last_30_days')
+
+        headers = []
+        rows = []
+
+        # Build dataset by entity
+        et = entity.lower()
+        if et == 'users':
+            users = User.query.filter(and_(User.municipality_id == municipality_id, User.role == 'resident')).all()
+            headers = ['ID','Name','Email','Phone','Verified','Joined']
+            for u in users:
+                name = f"{getattr(u,'first_name','') or ''} {getattr(u,'last_name','') or ''}".strip() or getattr(u,'username','')
+                rows.append([u.id, name, getattr(u,'email',''), getattr(u,'phone_number',''), 'Yes' if getattr(u,'admin_verified',False) else 'No', (u.created_at.isoformat()[:10] if getattr(u,'created_at',None) else '')])
+        elif et == 'benefits':
+            items = BenefitProgram.query.filter(BenefitProgram.municipality_id == municipality_id).all()
+            headers = ['ID','Name','Active','Created']
+            rows = [[b.id, getattr(b,'name',''), 'Yes' if getattr(b,'is_active',False) else 'No', (b.created_at.isoformat()[:10] if getattr(b,'created_at',None) else '')] for b in items]
+        elif et == 'requests':
+            items = DocumentRequest.query.filter(and_(DocumentRequest.municipality_id == municipality_id, DocumentRequest.created_at >= start, DocumentRequest.created_at <= end)).all()
+            headers = ['ID','Req No','User','Type','Status','Created']
+            for r in items:
+                user = User.query.get(r.user_id)
+                name = f"{getattr(user,'first_name','') or ''} {getattr(user,'last_name','') or ''}".strip() or getattr(user,'username','')
+                rows.append([r.id, r.request_number, name, getattr(r.document_type,'name',None) if hasattr(r,'document_type') else '', r.status, (r.created_at.isoformat()[:19].replace('T',' ') if r.created_at else '')])
+        elif et == 'issues':
+            items = Issue.query.filter(Issue.municipality_id == municipality_id).all()
+            headers = ['ID','Title','Status','Created']
+            rows = [[i.id, i.title, i.status, (i.created_at.isoformat()[:19].replace('T',' ') if i.created_at else '')] for i in items]
+        elif et == 'items':
+            items = MarketplaceItem.query.filter(MarketplaceItem.municipality_id == municipality_id).all()
+            headers = ['ID','Title','Status','Created']
+            rows = [[i.id, i.title, i.status, (i.created_at.isoformat()[:19].replace('T',' ') if i.created_at else '')] for i in items]
+        elif et == 'announcements':
+            items = Announcement.query.filter(Announcement.municipality_id == municipality_id).all()
+            headers = ['ID','Title','Active','Created']
+            rows = [[a.id, a.title, 'Yes' if getattr(a,'is_active',False) else 'No', (a.created_at.isoformat()[:10] if getattr(a,'created_at',None) else '')] for a in items]
+        elif et == 'audit':
+            items = AuditLog.query.filter(AuditLog.municipality_id == municipality_id).order_by(AuditLog.created_at.desc()).limit(1000).all()
+            headers = ['Time','Actor','Role','Entity','Entity ID','Action']
+            rows = [[(l.created_at.isoformat()[:19].replace('T',' ') if l.created_at else ''), l.user_id, l.actor_role, l.entity_type, l.entity_id, l.action] for l in items]
+        else:
+            return jsonify({'error': 'Unknown export entity'}), 400
+
+        from pathlib import Path
+        base = Path(current_app.config.get('UPLOAD_FOLDER', 'uploads'))
+        out_dir = base / 'exports' / str(muni_slug)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filename_base = f"{et}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+
+        if fmt.lower() == 'pdf':
+            from apps.api.utils.pdf_table_report import generate_table_pdf
+            out_path = out_dir / f"{filename_base}.pdf"
+            generate_table_pdf(out_path=out_path, title=f"{municipality_name} – {et.title()} Report", municipality_name=municipality_name, headers=headers, rows=rows)
+            rel = str(out_path.relative_to(base)).replace('\\','/')
+            return jsonify({'url': rel, 'summary': {'rows': len(rows)}}), 200
+        if fmt.lower() in ('xlsx','excel'):
+            from apps.api.utils.excel_generator import generate_workbook, save_workbook
+            out_path = out_dir / f"{filename_base}.xlsx"
+            gov_lines = [
+                'Republic of the Philippines',
+                'Province of Zambales',
+                f'Municipality of {municipality_name}',
+                'Office of the Municipal Mayor',
+            ]
+            wb = generate_workbook({
+                et.title(): {
+                    'headers': headers,
+                    'rows': rows,
+                    'municipality_name': municipality_name,
+                    'title': f'{municipality_name} – {et.title()} Report',
+                    'gov_lines': gov_lines,
+                }
+            })
+            save_workbook(wb, out_path)
+            rel = str(out_path.relative_to(base)).replace('\\','/')
+            return jsonify({'url': rel, 'summary': {'rows': len(rows)}}), 200
+
+        return jsonify({'error': 'Unsupported format'}), 400
+    except Exception as e:
+        return jsonify({'error': 'Failed to export', 'details': str(e)}), 500
+
+
+@admin_bp.route('/cleanup', methods=['POST'])
+@jwt_required()
+def admin_cleanup():
+    try:
+        municipality_id = require_admin_municipality()
+        if isinstance(municipality_id, tuple):
+            return municipality_id
+        payload = request.get_json(silent=True) or {}
+        entity = (payload.get('entity') or '').lower()
+        confirm = payload.get('confirm')
+        archive = bool(payload.get('archive'))
+        before = payload.get('before')
+        if confirm != 'DELETE':
+            return jsonify({'error': 'Confirmation required'}), 400
+
+        cutoff = None
+        try:
+            if before:
+                cutoff = datetime.fromisoformat(before)
+        except Exception:
+            cutoff = None
+
+        deleted = 0
+        archived_url = None
+
+        from pathlib import Path
+        base = Path(current_app.config.get('UPLOAD_FOLDER', 'uploads'))
+        out_dir = base / 'archives'
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        def _write_json(path, items):
+            import json
+            path.write_text(json.dumps(items, default=str, ensure_ascii=False, indent=2), encoding='utf-8')
+
+        if entity == 'announcements':
+            q = Announcement.query.filter(Announcement.municipality_id == municipality_id)
+            if cutoff:
+                q = q.filter(Announcement.created_at <= cutoff)
+            items = q.all()
+            if archive and items:
+                zpath = out_dir / f"announcements-{municipality_id}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
+                _write_json(zpath, [getattr(i,'to_dict',lambda: {})() if hasattr(i,'to_dict') else {'id': i.id, 'title': i.title} for i in items])
+                archived_url = str(zpath.relative_to(base)).replace('\\','/')
+            for i in items:
+                db.session.delete(i)
+            deleted = len(items)
+        elif entity == 'requests':
+            q = DocumentRequest.query.filter(DocumentRequest.municipality_id == municipality_id)
+            if cutoff:
+                q = q.filter(DocumentRequest.created_at <= cutoff)
+            items = q.all()
+            if archive and items:
+                zpath = out_dir / f"requests-{municipality_id}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
+                _write_json(zpath, [r.to_dict() for r in items])
+                archived_url = str(zpath.relative_to(base)).replace('\\','/')
+            for i in items:
+                db.session.delete(i)
+            deleted = len(items)
+        else:
+            return jsonify({'error': 'Unsupported entity for cleanup'}), 400
+
+        db.session.commit()
+
+        try:
+            log_generic_action(
+                user_id=get_jwt_identity(),
+                municipality_id=municipality_id,
+                entity_type=entity,
+                entity_id=None,
+                action='cleanup_delete',
+                actor_role='admin',
+                old_values=None,
+                new_values={'deleted': deleted, 'before': before},
+                notes='Archive saved' if archived_url else None,
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        return jsonify({'deleted_count': deleted, 'archived_url': archived_url}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to cleanup', 'details': str(e)}), 500
 
 
 @admin_bp.route('/transactions/<int:tx_id>', methods=['GET'])

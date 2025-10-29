@@ -19,6 +19,7 @@ try:
     from apps.api.models.issue import IssueCategory, Issue, IssueUpdate
     from apps.api.models.benefit import BenefitProgram, BenefitApplication
     from apps.api.models.token_blacklist import TokenBlacklist
+    from apps.api.models.audit import AuditLog
 except ImportError:
     from .user import User
     from .municipality import Municipality, Barangay
@@ -27,6 +28,7 @@ except ImportError:
     from .issue import IssueCategory, Issue, IssueUpdate
     from .benefit import BenefitProgram, BenefitApplication
     from .token_blacklist import TokenBlacklist
+    from .audit import AuditLog
 
 __all__ = [
     'User',
@@ -43,5 +45,6 @@ __all__ = [
     'BenefitProgram',
     'BenefitApplication',
     'TokenBlacklist',
+    'AuditLog',
 ]
 

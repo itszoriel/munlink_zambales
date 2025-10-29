@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { adminApi, handleApiError, documentsAdminApi, mediaUrl, showToast } from '../lib/api'
+import { adminApi, handleApiError, documentsAdminApi, mediaUrl, showToast, auditAdminApi } from '../lib/api'
 import { ClipboardList, Hourglass, Cog, CheckCircle, PartyPopper, Smartphone, Package as PackageIcon, Search } from 'lucide-react'
 
 type Status = 'all' | 'pending' | 'processing' | 'ready' | 'completed' | 'picked_up'
@@ -47,6 +47,7 @@ export default function Requests() {
             resident_input: (r as any).resident_input,
             admin_edited_content: (r as any).admin_edited_content,
             additional_notes: r.additional_notes,
+            has_claim_token: !!(r as any).qr_code,
           }
         })
         if (mounted) setRows(mapped)
@@ -103,6 +104,10 @@ export default function Requests() {
   const [verifyRequestId, setVerifyRequestId] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<any | null>(null)
+  const [historyFor, setHistoryFor] = useState<number | null>(null)
+  const [historyRows, setHistoryRows] = useState<any[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [moreForId, setMoreForId] = useState<number | null>(null)
   const visibleRows = rows.filter((r) => {
     // If Ready filter is active, and delivery filter is 'all', force pickup-only per requirements
     const effectiveDelivery = deliveryFilter === 'all' && statusFilter === 'ready' ? 'pickup' : deliveryFilter
@@ -141,6 +146,7 @@ export default function Requests() {
           resident_input: (r as any).resident_input,
           admin_edited_content: (r as any).admin_edited_content,
           additional_notes: r.additional_notes,
+          has_claim_token: !!(r as any).qr_code,
         }
       })
       setRows(mapped)
@@ -164,18 +170,46 @@ export default function Requests() {
     }
   }
 
-  const handleSetProcessing = async (row: any) => {
+  const handleApprove = async (row: any) => {
     try {
       setActionLoading(String(row.id))
-      await documentsAdminApi.updateStatus(row.request_id, 'processing')
+      await documentsAdminApi.updateStatus(row.request_id, 'approved')
       await refresh()
-      showToast('Request marked as processing', 'success')
+      showToast('Request approved', 'success')
     } catch (e: any) {
       showToast(handleApiError(e), 'error')
     } finally {
       setActionLoading(null)
     }
   }
+
+  const handleStartProcessing = async (row: any) => {
+    try {
+      setActionLoading(String(row.id))
+      await documentsAdminApi.updateStatus(row.request_id, 'processing')
+      await refresh()
+      showToast('Started processing', 'success')
+    } catch (e: any) {
+      showToast(handleApiError(e), 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleGenerateClaim = async (row: any) => {
+    try {
+      setActionLoading(String(row.id))
+      await documentsAdminApi.claimToken(row.request_id)
+      await refresh()
+      showToast('Claim token generated', 'success')
+    } catch (e: any) {
+      showToast(handleApiError(e), 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // (replaced by handleStartProcessing)
 
   const handleSetReady = async (row: any) => {
     try {
@@ -357,44 +391,51 @@ export default function Requests() {
                       <span>{request.status === 'picked_up' ? 'Picked Up' : (request.status.charAt(0).toUpperCase() + request.status.slice(1))}</span>
                     </span>
                   </div>
-                  <div className="sm:col-span-1 text-left sm:text-right space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:justify-end sm:gap-2">
+                  <div className="sm:col-span-1 text-left sm:text-right space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:justify-end sm:gap-2 relative">
+                    <button
+                      className="w-full sm:w-auto px-3 py-2 bg-white border border-neutral-200 hover:bg-neutral-50 text-neutral-800 rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                      onClick={() => setMoreForId(moreForId===request.request_id?null:request.request_id)}
+                    >More</button>
+                    {moreForId===request.request_id && (
+                      <div className="absolute right-0 top-10 z-10 bg-white border border-neutral-200 rounded-lg shadow-md w-40 py-1">
+                        <button className="block w-full text-left px-3 py-2 text-xs hover:bg-neutral-50" onClick={async ()=> {
+                          try {
+                            setLoadingHistory(true); setHistoryFor(request.request_id); setMoreForId(null)
+                            const res = await auditAdminApi.list({ entity_type: 'document_request', entity_id: request.request_id, per_page: 50 })
+                            const data: any = (res as any)
+                            setHistoryRows(data.logs || data.data?.logs || [])
+                          } finally { setLoadingHistory(false) }
+                        }}>History</button>
+                        {request.document_file && (
+                          <button className="block w-full text-left px-3 py-2 text-xs hover:bg-neutral-50" onClick={()=> { setMoreForId(null); handleViewPdf(request) }}>View Document</button>
+                        )}
+                        <button className="block w-full text-left px-3 py-2 text-xs text-rose-700 hover:bg-rose-50" onClick={()=> { setMoreForId(null); openReject(request) }}>Reject</button>
+                      </div>
+                    )}
                     {(() => {
                       const hasPdf = !!request.document_file
                       const isPending = request.status === 'pending'
+                      const isApproved = request.status === 'approved'
                       const isProcessing = request.status === 'processing'
                       const isReady = request.status === 'ready'
                       const isPickup = request.delivery_method === 'pickup'
+                      const hasToken = !!request.has_claim_token
 
                       if (isPending) {
-                        if (!hasPdf) {
-                          return (
-                            <>
-                              <button
-                                onClick={() => {
-                                  const edited = (request as any).admin_edited_content || {}
-                                  const resident = (request as any).resident_input || {}
-                                  const legacyNotes = (request as any).additional_notes
-                                  let remarks = ''
-                                  if (edited && edited.remarks) remarks = edited.remarks
-                                  else if (resident && resident.remarks) remarks = resident.remarks
-                                  else if (typeof legacyNotes === 'string') remarks = legacyNotes
-                                  const ageVal = (edited?.age ?? resident?.age)
-                                  setEditFor({ id: request.request_id, purpose: (edited?.purpose || request.purpose || ''), remarks: remarks || '', civil_status: (edited?.civil_status || request.civil_status || ''), age: (ageVal !== undefined && ageVal !== null) ? String(ageVal) : '' })
-                                }}
-                                className="w-full sm:w-auto px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs sm:text-sm font-medium transition-colors"
-                              >Edit</button>
-                              <button
-                                onClick={() => openReject(request)}
-                                className="w-full sm:w-auto px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                                disabled={actionLoading === String(request.id)}
-                              >Reject</button>
-                            </>
-                          )
-                        }
                         return (
                           <button
-                            onClick={() => handleSetProcessing(request)}
+                            onClick={() => handleApprove(request)}
                             className="w-full sm:w-auto px-3 py-2 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                            disabled={actionLoading === String(request.id)}
+                          >{actionLoading === String(request.id) ? 'Approving…' : 'Approve'}</button>
+                        )
+                      }
+
+                      if (isApproved) {
+                        return (
+                          <button
+                            onClick={() => handleStartProcessing(request)}
+                            className="w-full sm:w-auto px-3 py-2 bg-ocean-100 hover:bg-ocean-200 text-ocean-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
                             disabled={actionLoading === String(request.id)}
                           >{actionLoading === String(request.id) ? 'Starting…' : 'Start Processing'}</button>
                         )
@@ -402,12 +443,39 @@ export default function Requests() {
 
                       if (isProcessing) {
                         if (isPickup) {
+                          if (!hasToken) {
+                            return (
+                              <button
+                                onClick={() => handleGenerateClaim(request)}
+                                className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                                disabled={actionLoading === String(request.id)}
+                              >{actionLoading === String(request.id) ? 'Generating…' : 'Generate Claim Token'}</button>
+                            )
+                          }
                           return (
                             <button
                               onClick={() => handleSetReady(request)}
                               className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
                               disabled={actionLoading === String(request.id)}
-                            >{actionLoading === String(request.id) ? 'Updating…' : 'Generate Ticket & Mark Ready'}</button>
+                            >{actionLoading === String(request.id) ? 'Updating…' : 'Mark Ready for Pickup'}</button>
+                          )
+                        }
+                        if (!hasPdf) {
+                          return (
+                            <button
+                              onClick={() => {
+                                const edited = (request as any).admin_edited_content || {}
+                                const resident = (request as any).resident_input || {}
+                                const legacyNotes = (request as any).additional_notes
+                                let remarks = ''
+                                if (edited && edited.remarks) remarks = edited.remarks
+                                else if (resident && resident.remarks) remarks = resident.remarks
+                                else if (typeof legacyNotes === 'string') remarks = legacyNotes
+                                const ageVal = (edited?.age ?? resident?.age)
+                                setEditFor({ id: request.request_id, purpose: (edited?.purpose || request.purpose || ''), remarks: remarks || '', civil_status: (edited?.civil_status || request.civil_status || ''), age: (ageVal !== undefined && ageVal !== null) ? String(ageVal) : '' })
+                              }}
+                              className="w-full sm:w-auto px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                            >Edit / Generate PDF</button>
                           )
                         }
                         return (
@@ -617,6 +685,34 @@ export default function Requests() {
                   }
                 }}
               >{savingEdit ? 'Working…' : 'Save & Generate'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* History Modal */}
+      {historyFor !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onKeyDown={(e)=> { if (e.key==='Escape') setHistoryFor(null) }}>
+          <div className="absolute inset-0 bg-black/40" onClick={()=> setHistoryFor(null)} />
+          <div className="relative bg-white w-[92%] max-w-lg max-h-[90vh] overflow-y-auto rounded-xl shadow-xl border p-5" tabIndex={-1} autoFocus>
+            <h3 className="text-lg font-semibold mb-2">Request History</h3>
+            <div className="text-sm text-neutral-600 mb-3">Request ID: {historyFor}</div>
+            {loadingHistory ? (
+              <div className="text-sm">Loading…</div>
+            ) : historyRows.length === 0 ? (
+              <div className="text-sm text-neutral-600">No entries.</div>
+            ) : (
+              <div className="space-y-2 text-sm">
+                {historyRows.map((l, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <span className="text-neutral-500 min-w-[11ch]">{String(l.created_at||'').replace('T',' ').slice(0,19)}</span>
+                    <span className="capitalize">{String(l.action||'').replace(/_/g,' ')}</span>
+                    <span className="text-neutral-600">{l.actor_role||'admin'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex items-center justify-end">
+              <button className="px-4 py-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm" onClick={()=> setHistoryFor(null)}>Close</button>
             </div>
           </div>
         </div>

@@ -217,9 +217,7 @@ export default function Residents() {
               <h1 className="text-3xl font-bold text-neutral-900">Residents</h1>
               <p className="text-neutral-600">Manage verified residents and user accounts</p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <button className="btn btn-ghost" aria-label="Export residents">Export Data</button>
-            </div>
+            <div className="flex items-center gap-2 shrink-0" />
           </div>
 
           {/* Toolbar: Search + Filters */}

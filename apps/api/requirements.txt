@@ -24,6 +24,7 @@ Pillow==11.0.0
 
 # PDF Generation
 reportlab==4.0.7
+openpyxl==3.1.5
 
 # QR Code Generation
 qrcode[pil]==7.4.2
