@@ -1,20 +1,24 @@
-{
-  "compilerOptions": {
-    "outDir": "dist",
-    "declaration": true,
-    "emitDeclarationOnly": false,
-    "composite": true,
-    "jsx": "react-jsx",
-    "moduleResolution": "bundler",
-    "module": "esnext",
-    "target": "ES2020",
-    "skipLibCheck": true,
-    "allowJs": false,
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
-  },
-  "include": ["src"]
+﻿{
+    "compilerOptions":  {
+                            "outDir":  "dist",
+                            "declaration":  true,
+                            "emitDeclarationOnly":  false,
+                            "composite":  true,
+                            "jsx":  "react-jsx",
+                            "moduleResolution":  "bundler",
+                            "module":  "esnext",
+                            "target":  "ES2020",
+                            "skipLibCheck":  true,
+                            "allowJs":  false,
+                            "strict":  true,
+                            "esModuleInterop":  true,
+                            "forceConsistentCasingInFileNames":  true,
+                            "types":  [
+                                          "react",
+                                          "react-dom"
+                                      ]
+                        },
+    "include":  [
+                    "src"
+                ]
 }
-
-
