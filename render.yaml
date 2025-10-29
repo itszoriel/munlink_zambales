@@ -1,7 +1,7 @@
-services:
+﻿services:
   # Backend API (Python/Flask)
   - type: web
-    name: munlinkapi
+        region: singapore
     runtime: python
     rootDir: apps/api
     buildCommand: |
@@ -74,10 +74,10 @@ services:
 
   # Public Website (React/Vite)
   - type: web
-    name: munlinkzambales
+        region: singapore
     runtime: static
     rootDir: apps/web
-    buildCommand: npm ci && npm run build
+    buildCommand: npm install --no-audit --no-fund && npm run build
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
@@ -87,10 +87,10 @@ services:
 
   # Admin Dashboard (React/Vite)
   - type: web
-    name: munlinkadmin
+        region: singapore
     runtime: static
     rootDir: apps/admin
-    buildCommand: npm ci && npm run build
+    buildCommand: npm install --no-audit --no-fund && npm run build
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
@@ -98,9 +98,9 @@ services:
       - key: VITE_API_BASE_URL
         value: https://munlinkapi.onrender.com
 
-databases:
-  - name: munlink-db
+    region: singapore
     databaseName: munlink_zambales
     user: munlink_user
     plan: basic-256mb  # Updated to supported plan (replaces legacy 'starter')
+
 
