@@ -100,5 +100,5 @@ databases:
   - name: munlink-db
     databaseName: munlink_zambales
     user: munlink_user
-    plan: starter  # Professional plan supports better DB options
+    plan: basic-256mb  # Updated to supported plan (replaces legacy 'starter')
 
