@@ -1,11 +1,11 @@
-﻿{
+{
     "name":  "admin",
     "private":  true,
     "version":  "0.0.0",
     "type":  "module",
     "scripts":  {
                     "preview":  "vite preview",
-                    "build":  "tsc \u0026\u0026 vite build",
+                    "build":  "tsc && vite build",
                     "dev":  "vite"
                 },
     "devDependencies":  {
@@ -24,6 +24,9 @@
                          "lucide-react":  "^0.545.0",
                          "@munlink/ui":  "file:../../packages/ui",
                          "react-router-dom":  "^7.9.4",
-                         "react":  "^19.2.0"
-                     }
+                         "react":  "^19.2.0",
+                         "zustand":  "^5.0.8"
+                      }
 }
+
+
