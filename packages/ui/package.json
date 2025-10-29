@@ -9,13 +9,18 @@
                   "dist"
               ],
     "scripts":  {
-                    "build":  "tsup src/index.ts --format esm,cjs --dts --clean",
-                    "dev":  "tsup src/index.ts --format esm,cjs --dts --watch"
+                    "dev":  "tsup src/index.ts --format esm,cjs --dts --watch",
+                    "build":  "tsup src/index.ts --format esm,cjs --dts --clean"
                 },
     "peerDependencies":  {
                              "react":  "\u003e=18",
-                             "react-dom":  "\u003e=18",
-                             "tailwindcss":  "\u003e=3.4"
+                             "tailwindcss":  "\u003e=3.4",
+                             "react-dom":  "\u003e=18"
                          },
-    "devDependencies":  null
+    "devDependencies":  {
+                            "tsup":  "^7",
+                            "typescript":  "^5",
+                            "@types/react":  "^19.2.2",
+                            "@types/react-dom":  "^19.2.2"
+                        }
 }

@@ -4,17 +4,26 @@
     "version":  "0.0.0",
     "type":  "module",
     "scripts":  {
-                    "dev":  "vite",
+                    "preview":  "vite preview",
                     "build":  "tsc \u0026\u0026 vite build",
-                    "preview":  "vite preview"
+                    "dev":  "vite"
                 },
-    "devDependencies":  null,
+    "devDependencies":  {
+                            "@vitejs/plugin-react":  "^5.0.4",
+                            "autoprefixer":  "^10.4.20",
+                            "postcss":  "^8.4.38",
+                            "tailwindcss":  "^3.4.15",
+                            "typescript":  "~5.9.3",
+                            "vite":  "^7.1.7",
+                            "@types/react":  "^19.2.2",
+                            "@types/react-dom":  "^19.2.2"
+                        },
     "dependencies":  {
-                         "@munlink/ui":  "file:../../packages/ui",
                          "axios":  "^1.12.2",
-                         "lucide-react":  "^0.545.0",
-                         "react":  "^19.2.0",
                          "react-dom":  "^19.2.0",
-                         "react-router-dom":  "^7.9.4"
+                         "lucide-react":  "^0.545.0",
+                         "@munlink/ui":  "file:../../packages/ui",
+                         "react-router-dom":  "^7.9.4",
+                         "react":  "^19.2.0"
                      }
 }
