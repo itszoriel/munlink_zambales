@@ -69,6 +69,8 @@ export default function DocumentsPage() {
     ;(async () => {
       try {
         setLoadingMy(true)
+        const isAuthenticated = !!useAppStore.getState().isAuthenticated
+        if (!isAuthenticated) { if (!cancelled) setMyRequests([]); return }
         const res = await documentsApi.getMyRequests()
         const list = (res as any)?.data?.requests || (res as any)?.requests || []
         if (!cancelled) setMyRequests(list)

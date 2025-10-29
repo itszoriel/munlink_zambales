@@ -1,5 +1,6 @@
 /** Tailwind preset for MunLink shared tokens and utilities */
 const colors = require('tailwindcss/colors')
+const plugin = require('tailwindcss/plugin')
 
 module.exports = {
   theme: {
@@ -96,6 +97,133 @@ module.exports = {
       },
     },
   },
+  plugins: [
+    plugin(function({ addComponents, addUtilities, theme }) {
+      addComponents({
+        '.btn': {
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '44px',
+          paddingLeft: theme('spacing.3'),
+          paddingRight: theme('spacing.3'),
+          paddingTop: theme('spacing.2'),
+          paddingBottom: theme('spacing.2'),
+          fontSize: theme('fontSize.sm')[0],
+          gap: theme('spacing.2'),
+          whiteSpace: 'normal',
+          wordBreak: 'break-word',
+        },
+        '.btn-ghost': {
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '44px',
+          paddingLeft: theme('spacing.3'),
+          paddingRight: theme('spacing.3'),
+          paddingTop: theme('spacing.2'),
+          paddingBottom: theme('spacing.2'),
+          color: theme('colors.neutral.700'),
+          backgroundColor: 'transparent',
+        },
+        '.btn-primary': {
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '44px',
+          paddingLeft: theme('spacing.3'),
+          paddingRight: theme('spacing.3'),
+          paddingTop: theme('spacing.2'),
+          paddingBottom: theme('spacing.2'),
+          color: theme('colors.white'),
+          backgroundColor: theme('colors.ocean.600'),
+          borderRadius: theme('borderRadius.lg'),
+          transitionProperty: 'background-color, transform, color',
+          transitionDuration: '150ms',
+        },
+        '.card': {
+          backgroundColor: theme('colors.white'),
+          borderRadius: theme('borderRadius.lg'),
+          boxShadow: theme('boxShadow.card'),
+          padding: theme('spacing.6'),
+          minWidth: 0,
+        },
+        '.input-field': {
+          width: '100%',
+          paddingLeft: theme('spacing.4'),
+          paddingRight: theme('spacing.4'),
+          paddingTop: theme('spacing.2'),
+          paddingBottom: theme('spacing.2'),
+          borderWidth: '1px',
+          borderColor: theme('colors.gray.300'),
+          borderRadius: theme('borderRadius.lg'),
+          outline: '2px solid transparent',
+          outlineOffset: '2px',
+        },
+        '.container-responsive': {
+          marginLeft: 'auto',
+          marginRight: 'auto',
+          maxWidth: theme('screens.xl'),
+          paddingLeft: theme('spacing.3'),
+          paddingRight: theme('spacing.3'),
+        },
+        '.responsive-img': {
+          width: '100%',
+          height: 'auto',
+          objectFit: 'cover',
+        },
+        '.pill': {
+          display: 'inline-flex',
+          alignItems: 'center',
+          paddingLeft: theme('spacing.3'),
+          paddingRight: theme('spacing.3'),
+          paddingTop: '0.375rem',
+          paddingBottom: '0.375rem',
+          borderRadius: theme('borderRadius.full'),
+          fontSize: theme('fontSize.sm')[0],
+          fontWeight: theme('fontWeight.medium'),
+        },
+        '.pill-neutral': {
+          backgroundColor: theme('colors.gray.100'),
+          color: theme('colors.gray.700'),
+        },
+        '.pill-ocean': {
+          backgroundColor: theme('colors.ocean.600'),
+          color: theme('colors.white'),
+        },
+        '.skeleton': {
+          backgroundColor: theme('colors.gray.200'),
+          borderRadius: theme('borderRadius.DEFAULT'),
+        },
+        '.skeleton-card': {
+          backgroundColor: theme('colors.white'),
+          borderRadius: theme('borderRadius.lg'),
+          boxShadow: theme('boxShadow.md'),
+          overflow: 'hidden',
+        },
+        '.skeleton-image': {
+          position: 'relative',
+          overflow: 'hidden',
+          backgroundColor: theme('colors.gray.200'),
+        },
+        '.skeleton-image::after': {
+          content: '""',
+          position: 'absolute',
+          inset: '0',
+          transform: 'translateX(-100%)',
+          backgroundImage: 'linear-gradient(to right, transparent, rgba(255,255,255,0.5), transparent)',
+          animation: theme('animation.shimmer'),
+        },
+      })
+
+      addUtilities({
+        '.text-fluid-3xl': { fontSize: 'clamp(1.75rem, 1.2rem + 2vw, 3rem)' },
+        '.text-fluid-5xl': { fontSize: 'clamp(2.25rem, 1.2rem + 3vw, 3.5rem)' },
+        '.text-fluid-6xl': { fontSize: 'clamp(2.5rem, 1.1rem + 5.5vw, 8rem)' },
+        '.text-fluid-xl': { fontSize: 'clamp(1.125rem, 0.7rem + 1.4vw, 2.25rem)' },
+      })
+    })
+  ],
 }
 
 

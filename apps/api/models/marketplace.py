@@ -131,7 +131,12 @@ class Transaction(db.Model):
     
     # Transaction Details
     transaction_type = db.Column(db.String(20), nullable=False)  # donate, lend, sell
-    status = db.Column(db.String(20), default='pending')  # pending, accepted, completed, cancelled, returned
+    # Status lifecycle now supports dual-confirmation and disputes
+    # pending -> awaiting_buyer -> accepted -> handed_over -> received ->
+    #   [lend] returned -> completed
+    #   [sell/donate] completed
+    # along with: rejected, cancelled, disputed
+    status = db.Column(db.String(20), default='pending')
     
     # Financial Details (for sell/lend)
     amount = db.Column(db.Numeric(10, 2), nullable=True)
@@ -190,6 +195,47 @@ class Transaction(db.Model):
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
         }
 
+
+class TransactionAuditLog(db.Model):
+    __tablename__ = 'transaction_audit_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=False)
+    actor_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    actor_role = db.Column(db.String(20), nullable=True)  # buyer, seller, admin, system
+    action = db.Column(db.String(50), nullable=False)  # propose, confirm, handover_seller, handover_buyer, return_buyer, return_seller, complete, dispute, admin_status, cancel, etc.
+    from_status = db.Column(db.String(20), nullable=True)
+    to_status = db.Column(db.String(20), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+    ip_address = db.Column(db.String(64), nullable=True)
+    user_agent = db.Column(db.String(255), nullable=True)
+    # 'metadata' is reserved by SQLAlchemy's declarative base; use different attribute name
+    metadata_json = db.Column('metadata', db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    transaction = db.relationship('Transaction', backref='audit_logs')
+
+    __table_args__ = (
+        Index('idx_audit_tx', 'transaction_id'),
+        Index('idx_audit_created', 'created_at'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'transaction_id': self.transaction_id,
+            'actor_id': self.actor_id,
+            'actor_role': self.actor_role,
+            'action': self.action,
+            'from_status': self.from_status,
+            'to_status': self.to_status,
+            'notes': self.notes,
+            'ip_address': self.ip_address,
+            'user_agent': self.user_agent,
+            'metadata': self.metadata_json,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
 
 class Message(db.Model):
     __tablename__ = 'messages'

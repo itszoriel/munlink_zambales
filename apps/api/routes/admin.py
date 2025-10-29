@@ -13,6 +13,8 @@ from apps.api.models.user import User
 from apps.api.models.municipality import Municipality
 from apps.api.models.issue import Issue, IssueCategory
 from apps.api.models.marketplace import Item as MarketplaceItem
+from apps.api.models.marketplace import Transaction as MarketplaceTransaction
+from apps.api.models.marketplace import TransactionAuditLog as MarketplaceTransactionAuditLog
 from apps.api.models.benefit import BenefitProgram
 from apps.api.models.benefit import BenefitApplication
 from apps.api.models.document import DocumentRequest, DocumentType
@@ -2027,3 +2029,162 @@ def admin_municipality_performance():
         return jsonify({'municipalities': data}), 200
     except Exception as e:
         return jsonify({'error': 'Failed to get municipality performance', 'details': str(e)}), 500
+
+
+# Marketplace Transactions (Admin)
+@admin_bp.route('/transactions', methods=['GET'])
+@jwt_required()
+def admin_list_transactions():
+    """List marketplace transactions with basic filters (status, date)."""
+    try:
+        # Province-level admins can view all; municipal_admins scoped to municipality
+        municipality_id = get_admin_municipality_id()
+        status = (request.args.get('status') or '').strip() or None
+        page = request.args.get('page', type=int) or 1
+        per_page = min(request.args.get('per_page', type=int) or 20, 100)
+
+        q = MarketplaceTransaction.query
+        if municipality_id:
+            # Scope by items in municipality
+            q = q.join(MarketplaceItem, MarketplaceItem.id == MarketplaceTransaction.item_id).filter(MarketplaceItem.municipality_id == municipality_id)
+        if status:
+            q = q.filter(MarketplaceTransaction.status == status)
+        q = q.order_by(MarketplaceTransaction.created_at.desc())
+        p = q.paginate(page=page, per_page=per_page, error_out=False)
+
+        rows = []
+        for t in p.items:
+            d = t.to_dict()
+            try:
+                item = MarketplaceItem.query.get(t.item_id)
+                d['item_title'] = getattr(item, 'title', None)
+            except Exception:
+                d['item_title'] = None
+            # Attach buyer/seller display names and photos (best-effort)
+            try:
+                buyer = User.query.get(t.buyer_id)
+                seller = User.query.get(t.seller_id)
+                d['buyer_name'] = (f"{getattr(buyer,'first_name','')} {getattr(buyer,'last_name','')}").strip() or getattr(buyer,'username', None) or str(t.buyer_id)
+                d['seller_name'] = (f"{getattr(seller,'first_name','')} {getattr(seller,'last_name','')}").strip() or getattr(seller,'username', None) or str(t.seller_id)
+                d['buyer_profile_picture'] = getattr(buyer, 'profile_picture', None)
+                d['seller_profile_picture'] = getattr(seller, 'profile_picture', None)
+            except Exception:
+                d['buyer_name'] = str(t.buyer_id)
+                d['seller_name'] = str(t.seller_id)
+            rows.append(d)
+
+        return jsonify({'transactions': rows, 'total': p.total, 'page': p.page, 'pages': p.pages, 'per_page': p.per_page}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to list transactions', 'details': str(e)}), 500
+
+
+@admin_bp.route('/transactions/<int:tx_id>', methods=['GET'])
+@jwt_required()
+def admin_get_transaction(tx_id: int):
+    try:
+        municipality_id = get_admin_municipality_id()
+        tx = MarketplaceTransaction.query.get(tx_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        if municipality_id:
+            item = MarketplaceItem.query.get(tx.item_id)
+            if not item or int(item.municipality_id) != int(municipality_id):
+                return jsonify({'error': 'Transaction not in your municipality'}), 403
+        # Build enriched transaction payload with buyer/seller names
+        txd = tx.to_dict()
+        try:
+            buyer = User.query.get(tx.buyer_id)
+            seller = User.query.get(tx.seller_id)
+            txd['buyer'] = {
+                'id': tx.buyer_id,
+                'first_name': getattr(buyer, 'first_name', None),
+                'last_name': getattr(buyer, 'last_name', None),
+                'username': getattr(buyer, 'username', None),
+                'email': getattr(buyer, 'email', None),
+                'profile_picture': getattr(buyer, 'profile_picture', None),
+            }
+            txd['seller'] = {
+                'id': tx.seller_id,
+                'first_name': getattr(seller, 'first_name', None),
+                'last_name': getattr(seller, 'last_name', None),
+                'username': getattr(seller, 'username', None),
+                'email': getattr(seller, 'email', None),
+                'profile_picture': getattr(seller, 'profile_picture', None),
+            }
+            txd['buyer_name'] = (f"{getattr(buyer,'first_name','')} {getattr(buyer,'last_name','')}").strip() or getattr(buyer, 'username', None)
+            txd['seller_name'] = (f"{getattr(seller,'first_name','')} {getattr(seller,'last_name','')}").strip() or getattr(seller, 'username', None)
+            txd['buyer_profile_picture'] = getattr(buyer, 'profile_picture', None)
+            txd['seller_profile_picture'] = getattr(seller, 'profile_picture', None)
+        except Exception:
+            pass
+
+        audit = []
+        try:
+            audit = [l.to_dict() for l in MarketplaceTransactionAuditLog.query.filter_by(transaction_id=tx.id).order_by(MarketplaceTransactionAuditLog.created_at.asc()).all()]
+        except Exception:
+            audit = []
+        return jsonify({'transaction': txd, 'audit': audit}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get transaction', 'details': str(e)}), 500
+
+
+@admin_bp.route('/transactions/<int:tx_id>/status', methods=['PUT'])
+@jwt_required()
+def admin_update_transaction_status(tx_id: int):
+    """Mark a disputed transaction under_review/resolved/confirmed_scam. Stores as audit metadata."""
+    try:
+        municipality_id = get_admin_municipality_id()
+        tx = MarketplaceTransaction.query.get(tx_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        if municipality_id:
+            item = MarketplaceItem.query.get(tx.item_id)
+            if not item or int(item.municipality_id) != int(municipality_id):
+                return jsonify({'error': 'Transaction not in your municipality'}), 403
+
+        payload = request.get_json(silent=True) or {}
+        new_status = (payload.get('status') or '').lower()
+        notes = payload.get('notes')
+        if new_status not in ('under_review', 'resolved', 'confirmed_scam'):
+            return jsonify({'error': 'Invalid status'}), 400
+
+        # Audit-only status marker; we do not change core tx.status except optionally when resolved
+        meta = {'admin_status': new_status}
+        if new_status == 'resolved' and tx.status == 'disputed':
+            prev = tx.status
+            tx.status = 'accepted'  # rollback to pre-dispute neutral state
+            tx.updated_at = datetime.utcnow()
+            db.session.add(tx)
+            # Also add audit row for resolution of dispute
+            al = MarketplaceTransactionAuditLog(
+                transaction_id=tx.id,
+                actor_id=int(get_jwt_identity()),
+                actor_role='admin',
+                action='admin_resolution',
+                from_status=prev,
+                to_status=tx.status,
+                notes=notes,
+                metadata_json=meta,
+                created_at=datetime.utcnow(),
+            )
+            db.session.add(al)
+        else:
+            al = MarketplaceTransactionAuditLog(
+                transaction_id=tx.id,
+                actor_id=int(get_jwt_identity()),
+                actor_role='admin',
+                action='admin_status',
+                from_status=tx.status,
+                to_status=tx.status,
+                notes=notes,
+                metadata_json=meta,
+                created_at=datetime.utcnow(),
+            )
+            db.session.add(al)
+
+        db.session.commit()
+        return jsonify({'message': 'Admin status recorded'}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to update transaction status', 'details': str(e)}), 500
+

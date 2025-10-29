@@ -6,9 +6,12 @@ Flask-JWT-Extended==4.5.3
 Flask-CORS==4.0.0
 
 # Database
-SQLAlchemy==2.0.23
-psycopg2-binary==2.9.7
-alembic==1.13.0
+# Use newer SQLAlchemy compatible with Python 3.13
+SQLAlchemy==2.0.34
+# Use SQLite locally; omit psycopg2-binary
+# psycopg2-binary==2.9.7
+# Align Alembic with latest compatible
+alembic==1.17.0
 
 # Authentication & Security
 bcrypt==4.1.1
@@ -17,7 +20,7 @@ cryptography==42.0.5
 
 # File Handling
 Werkzeug==3.0.1
-Pillow==10.1.0
+Pillow==11.0.0
 
 # PDF Generation
 reportlab==4.0.7

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { adminApi, handleApiError, documentsAdminApi, mediaUrl, showToast } from '../lib/api'
-import { ClipboardList, Hourglass, Cog, CheckCircle, PartyPopper, Smartphone, Package as PackageIcon } from 'lucide-react'
+import { ClipboardList, Hourglass, Cog, CheckCircle, PartyPopper, Smartphone, Package as PackageIcon, Search } from 'lucide-react'
 
 type Status = 'all' | 'pending' | 'processing' | 'ready' | 'completed' | 'picked_up'
 
@@ -97,6 +97,12 @@ export default function Requests() {
   const [rejectReason, setRejectReason] = useState<string>('')
   const [editFor, setEditFor] = useState<null | { id: number; purpose: string; remarks: string; civil_status: string; age?: string }>(null)
   const [savingEdit, setSavingEdit] = useState(false)
+  const [verifyOpen, setVerifyOpen] = useState(false)
+  const [verifyToken, setVerifyToken] = useState('')
+  const [verifyCode, setVerifyCode] = useState('')
+  const [verifyRequestId, setVerifyRequestId] = useState('')
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<any | null>(null)
   const visibleRows = rows.filter((r) => {
     // If Ready filter is active, and delivery filter is 'all', force pickup-only per requirements
     const effectiveDelivery = deliveryFilter === 'all' && statusFilter === 'ready' ? 'pickup' : deliveryFilter
@@ -143,40 +149,7 @@ export default function Requests() {
     }
   }
 
-  const handleGeneratePdf = async (row: any) => {
-    try {
-      setActionLoading(String(row.id))
-      const res = await documentsAdminApi.generatePdf(row.request_id)
-      await refresh()
-      const url = (res as any)?.url || (res as any)?.data?.url
-      if (url) {
-        window.open(mediaUrl(url), '_blank')
-        showToast('Document generated successfully', 'success')
-      }
-    } catch (e: any) {
-      showToast(handleApiError(e), 'error')
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const handleApproveAndGenerate = async (row: any) => {
-    try {
-      setActionLoading(String(row.id))
-      await documentsAdminApi.updateStatus(row.request_id, 'processing')
-      const res = await documentsAdminApi.generatePdf(row.request_id)
-      await refresh()
-      const url = (res as any)?.url || (res as any)?.data?.url
-      if (url) {
-        window.open(mediaUrl(url), '_blank')
-        showToast('Document approved and generated', 'success')
-      }
-    } catch (e: any) {
-      showToast(handleApiError(e), 'error')
-    } finally {
-      setActionLoading(null)
-    }
-  }
+  
 
   const handleViewPdf = async (row: any) => {
     try {
@@ -320,6 +293,9 @@ export default function Requests() {
               <option value="digital">Digital</option>
               <option value="pickup">Pickup</option>
             </select>
+            <button className="px-4 py-2 bg-white border border-neutral-200 hover:border-ocean-500 rounded-lg text-sm font-medium transition-all flex items-center gap-2" onClick={()=> setVerifyOpen(true)}>
+              <Search className="w-4 h-4" aria-hidden="true" /> Verify Ticket
+            </button>
             <button className="px-4 py-2 bg-white border border-neutral-200 hover:border-ocean-500 rounded-lg text-sm font-medium transition-all flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
               Filter
@@ -336,7 +312,7 @@ export default function Requests() {
             </div>
           )}
           {!loading && visibleRows.map((request) => (
-            <div key={request.id} className="px-6 py-5 hover:bg-ocean-50/30 transition-colors group">
+            <div key={request.id} id={`req-${request.request_id}`} className="px-6 py-5 hover:bg-ocean-50/30 transition-colors group">
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
                 <div className={`sm:col-span-1 w-1 h-6 sm:h-16 rounded-full ${request.priority === 'urgent' ? 'bg-red-500' : request.priority === 'high' ? 'bg-yellow-500' : 'bg-neutral-300'}`} />
                 <div className="sm:col-span-11 grid grid-cols-1 sm:grid-cols-12 gap-4 items-center min-w-0">
@@ -382,76 +358,95 @@ export default function Requests() {
                     </span>
                   </div>
                   <div className="sm:col-span-1 text-left sm:text-right space-y-2 sm:space-y-0 sm:flex sm:flex-wrap sm:justify-end sm:gap-2">
-                    <button
-                      onClick={() => {
-                        const edited = (request as any).admin_edited_content || {}
-                        const resident = (request as any).resident_input || {}
-                        const legacyNotes = (request as any).additional_notes
-                        let remarks = ''
-                        if (edited && edited.remarks) remarks = edited.remarks
-                        else if (resident && resident.remarks) remarks = resident.remarks
-                        else if (typeof legacyNotes === 'string') remarks = legacyNotes
-                        const ageVal = (edited?.age ?? resident?.age)
-                        setEditFor({ id: request.request_id, purpose: (edited?.purpose || request.purpose || ''), remarks: remarks || '', civil_status: (edited?.civil_status || request.civil_status || ''), age: (ageVal !== undefined && ageVal !== null) ? String(ageVal) : '' })
-                      }}
-                      className="w-full sm:w-auto px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs sm:text-sm font-medium transition-colors"
-                    >Edit</button>
-                    {request.status === 'pending' && (
-                      <button
-                        onClick={() => handleSetProcessing(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Starting…' : 'Start Processing'}</button>
-                    )}
-                    {request.status === 'pending' && (
-                      <button
-                        onClick={() => openReject(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >Reject</button>
-                    )}
-                    {request.status === 'pending' && request.delivery_method === 'digital' && (
-                      <button
-                        onClick={() => handleApproveAndGenerate(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Generating…' : 'Approve & Generate'}</button>
-                    )}
-                    {request.status === 'processing' && request.delivery_method === 'digital' && (
-                      <button
-                        onClick={() => handleGeneratePdf(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Generating…' : 'Generate PDF'}</button>
-                    )}
-                    {request.status === 'processing' && request.delivery_method === 'pickup' && (
-                      <button
-                        onClick={() => handleSetReady(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Updating…' : 'Generate Ticket & Mark Ready'}</button>
-                    )}
-                    {request.status === 'ready' && request.delivery_method === 'pickup' && (
-                      <button
-                        onClick={() => handlePickedUp(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Saving…' : 'Mark Picked Up'}</button>
-                    )}
-                    {request.status === 'ready' && request.delivery_method === 'digital' && (
-                      <button
-                        onClick={() => handleViewPdf(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Opening…' : 'View Document'}</button>
-                    )}
-                    {request.status === 'ready' && (
-                      <button
-                        onClick={() => handleComplete(request)}
-                        className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
-                        disabled={actionLoading === String(request.id)}
-                      >{actionLoading === String(request.id) ? 'Completing…' : 'Mark Completed'}</button>
-                    )}
+                    {(() => {
+                      const hasPdf = !!request.document_file
+                      const isPending = request.status === 'pending'
+                      const isProcessing = request.status === 'processing'
+                      const isReady = request.status === 'ready'
+                      const isPickup = request.delivery_method === 'pickup'
+
+                      if (isPending) {
+                        if (!hasPdf) {
+                          return (
+                            <>
+                              <button
+                                onClick={() => {
+                                  const edited = (request as any).admin_edited_content || {}
+                                  const resident = (request as any).resident_input || {}
+                                  const legacyNotes = (request as any).additional_notes
+                                  let remarks = ''
+                                  if (edited && edited.remarks) remarks = edited.remarks
+                                  else if (resident && resident.remarks) remarks = resident.remarks
+                                  else if (typeof legacyNotes === 'string') remarks = legacyNotes
+                                  const ageVal = (edited?.age ?? resident?.age)
+                                  setEditFor({ id: request.request_id, purpose: (edited?.purpose || request.purpose || ''), remarks: remarks || '', civil_status: (edited?.civil_status || request.civil_status || ''), age: (ageVal !== undefined && ageVal !== null) ? String(ageVal) : '' })
+                                }}
+                                className="w-full sm:w-auto px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs sm:text-sm font-medium transition-colors"
+                              >Edit</button>
+                              <button
+                                onClick={() => openReject(request)}
+                                className="w-full sm:w-auto px-3 py-2 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                                disabled={actionLoading === String(request.id)}
+                              >Reject</button>
+                            </>
+                          )
+                        }
+                        return (
+                          <button
+                            onClick={() => handleSetProcessing(request)}
+                            className="w-full sm:w-auto px-3 py-2 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                            disabled={actionLoading === String(request.id)}
+                          >{actionLoading === String(request.id) ? 'Starting…' : 'Start Processing'}</button>
+                        )
+                      }
+
+                      if (isProcessing) {
+                        if (isPickup) {
+                          return (
+                            <button
+                              onClick={() => handleSetReady(request)}
+                              className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                              disabled={actionLoading === String(request.id)}
+                            >{actionLoading === String(request.id) ? 'Updating…' : 'Generate Ticket & Mark Ready'}</button>
+                          )
+                        }
+                        return (
+                          <button
+                            onClick={() => handleComplete(request)}
+                            className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                            disabled={actionLoading === String(request.id)}
+                          >{actionLoading === String(request.id) ? 'Completing…' : 'Mark Completed'}</button>
+                        )
+                      }
+
+                      if (isReady) {
+                        if (isPickup) {
+                          return (
+                            <button
+                              onClick={() => handlePickedUp(request)}
+                              className="w-full sm:w-auto px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                              disabled={actionLoading === String(request.id)}
+                            >{actionLoading === String(request.id) ? 'Saving…' : 'Mark Picked Up'}</button>
+                          )
+                        }
+                        return (
+                          <>
+                            <button
+                              onClick={() => handleComplete(request)}
+                              className="w-full sm:w-auto px-3 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                              disabled={actionLoading === String(request.id)}
+                            >{actionLoading === String(request.id) ? 'Completing…' : 'Mark Completed'}</button>
+                            <button
+                              onClick={() => handleViewPdf(request)}
+                              className="w-full sm:w-auto px-3 py-2 bg-white border border-neutral-200 hover:bg-neutral-50 text-neutral-800 rounded-lg text-xs sm:text-sm font-medium transition-colors disabled:opacity-60"
+                              disabled={actionLoading === String(request.id)}
+                            >{actionLoading === String(request.id) ? 'Opening…' : 'View Document'}</button>
+                          </>
+                        )
+                      }
+
+                      return null
+                    })()}
                   </div>
                 </div>
               </div>
@@ -459,6 +454,87 @@ export default function Requests() {
           ))}
         </div>
       </div>
+      {/* Verify Ticket Modal */}
+      {verifyOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onKeyDown={(e)=>{ if (e.key==='Escape') setVerifyOpen(false)}}>
+          <div className="absolute inset-0 bg-black/40" onClick={()=> setVerifyOpen(false)} />
+          <div className="relative bg-white w-[92%] max-w-lg max-h-[90vh] overflow-y-auto rounded-xl shadow-xl border p-5" tabIndex={-1} autoFocus>
+            <h3 className="text-lg font-semibold mb-2">Verify Claim Ticket</h3>
+            <p className="text-sm text-neutral-600 mb-3">Paste the token from the QR, or enter the fallback code and request ID.</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Token (preferred)</label>
+                <input className="w-full border rounded px-3 py-2 text-sm" value={verifyToken} onChange={(e)=> setVerifyToken(e.target.value)} placeholder="Paste token here" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Fallback Code</label>
+                  <input className="w-full border rounded px-3 py-2 text-sm" value={verifyCode} onChange={(e)=> setVerifyCode(e.target.value)} placeholder="XXXX-XXXX" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Request ID</label>
+                  <input className="w-full border rounded px-3 py-2 text-sm" value={verifyRequestId} onChange={(e)=> setVerifyRequestId(e.target.value)} placeholder="e.g., 123" />
+                </div>
+              </div>
+            </div>
+            {verifyResult && (
+              <div className="mt-4 p-3 rounded-lg bg-neutral-50 border text-sm">
+                <div className="font-medium mb-1">Match found</div>
+                <div>Request ID: <span className="font-mono">{verifyResult.id}</span></div>
+                <div>Request No.: <span className="font-mono">{verifyResult.request_number}</span></div>
+                <div>Resident: {verifyResult.resident}</div>
+                <div>Document: {verifyResult.document}</div>
+                <div>Status: <span className="capitalize">{verifyResult.status}</span></div>
+              </div>
+            )}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button className="px-4 py-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm" onClick={()=> setVerifyOpen(false)}>Close</button>
+              <button
+                className="px-4 py-2 rounded-lg bg-ocean-600 hover:bg-ocean-700 text-white text-sm disabled:opacity-60"
+                disabled={verifying || (!verifyToken && (!verifyCode || !verifyRequestId))}
+                onClick={async ()=>{
+                  try {
+                    setVerifying(true)
+                    const payload: any = {}
+                    if (verifyToken) payload.token = verifyToken
+                    if (!verifyToken) { payload.code = verifyCode; payload.request_id = Number(verifyRequestId) }
+                    const res = await documentsAdminApi.verifyClaim(payload)
+                    const ok = (res as any)?.ok || (res as any)?.data?.ok
+                    if (ok) {
+                      const request = (res as any)?.request || (res as any)?.data?.request
+                      setVerifyResult(request)
+                      showToast('Ticket verified', 'success')
+                    } else {
+                      showToast('Verification failed', 'error')
+                    }
+                  } catch (e: any) {
+                    showToast(handleApiError(e), 'error')
+                  } finally {
+                    setVerifying(false)
+                  }
+                }}
+              >{verifying ? 'Verifying…' : 'Verify'}</button>
+              {verifyResult && (
+                <button
+                  className="px-4 py-2 rounded-lg bg-forest-600 hover:bg-forest-700 text-white text-sm"
+                  onClick={() => {
+                    try {
+                      const status = String(verifyResult.status || '').toLowerCase()
+                      const normalized = status === 'in_progress' ? 'processing' : status === 'resolved' ? 'ready' : status === 'closed' ? 'completed' : status
+                      setStatusFilter((normalized === 'pending' || normalized === 'processing' || normalized === 'ready' || normalized === 'completed') ? normalized as any : 'all')
+                      setVerifyOpen(false)
+                      setTimeout(() => {
+                        const el = document.getElementById(`req-${verifyResult.id}`) || document.getElementById(`req-${verifyResult.request_id}`)
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                      }, 350)
+                    } catch {}
+                  }}
+                >Locate in list</button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Reject Modal */}
       {rejectForId !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setRejectForId(null) }}>
@@ -526,7 +602,6 @@ export default function Requests() {
                   try {
                     setSavingEdit(true)
                     await documentsAdminApi.updateContent(editFor.id, { purpose: editFor.purpose || undefined, remarks: editFor.remarks || undefined, civil_status: editFor.civil_status || undefined, age: (editFor.age && !Number.isNaN(Number(editFor.age))) ? Number(editFor.age) : undefined })
-                    await documentsAdminApi.updateStatus(editFor.id, 'processing')
                     const res = await documentsAdminApi.generatePdf(editFor.id)
                     await refresh()
                     const url = (res as any)?.url || (res as any)?.data?.url

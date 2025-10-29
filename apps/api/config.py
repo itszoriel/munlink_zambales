@@ -33,6 +33,16 @@ class Config:
         seconds=int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 86400))
     )
     JWT_ALGORITHM = 'HS256'
+    # Enable JWT in headers and cookies; use cookies for refresh token
+    JWT_TOKEN_LOCATION = ['headers', 'cookies']
+    # Cookie settings for refresh token (and optionally access later)
+    JWT_COOKIE_SECURE = (os.getenv('JWT_COOKIE_SECURE', 'False' if DEBUG else 'True') == 'True')
+    JWT_COOKIE_SAMESITE = os.getenv('JWT_COOKIE_SAMESITE', 'Lax')
+    JWT_COOKIE_DOMAIN = os.getenv('COOKIE_DOMAIN')  # e.g., .munlink.example.com
+    JWT_ACCESS_COOKIE_PATH = '/'
+    JWT_REFRESH_COOKIE_PATH = '/'
+    # CSRF can be enabled later if we migrate access to cookies
+    JWT_COOKIE_CSRF_PROTECT = (os.getenv('JWT_COOKIE_CSRF_PROTECT', 'False') == 'True')
     
     # Admin Security
     ADMIN_SECRET_KEY = os.getenv('ADMIN_SECRET_KEY', 'admin-secret-key')

@@ -72,6 +72,22 @@ from apps.api.utils.qr_generator import (
     validate_qr_data,
 )
 
+# Transaction audit helpers
+try:
+    from apps.api.utils.tx_audit import (
+        log_tx_action,
+        require_tx_role,
+        assert_status,
+        TransitionError,
+    )
+except ImportError:
+    from .tx_audit import (
+        log_tx_action,
+        require_tx_role,
+        assert_status,
+        TransitionError,
+    )
+
 __all__ = [
     # Validators
     'validate_email',
@@ -118,4 +134,9 @@ __all__ = [
     'generate_qr_code_image',
     'save_qr_code_file',
     'validate_qr_data',
+    # Tx audit
+    'log_tx_action',
+    'require_tx_role',
+    'assert_status',
+    'TransitionError',
 ]

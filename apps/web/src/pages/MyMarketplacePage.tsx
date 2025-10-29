@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import { marketplaceApi, mediaUrl, showToast } from '@/lib/api'
+import { useAppStore } from '@/lib/store'
 import Modal from '@/components/ui/Modal'
 
 type MyItem = {
@@ -25,6 +26,8 @@ type MyTx = {
 }
 
 export default function MyMarketplacePage() {
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated)
+  const isAuthBootstrapped = useAppStore((s) => s.isAuthBootstrapped)
   const [tab, setTab] = useState<'items' | 'transactions'>('items')
   const [searchParams] = useSearchParams()
   const [items, setItems] = useState<MyItem[]>([])
@@ -39,6 +42,7 @@ export default function MyMarketplacePage() {
   const [acceptingTx, setAcceptingTx] = useState<MyTx | null>(null)
   const [acceptPickupAt, setAcceptPickupAt] = useState<string>('')
   const [acceptPickupLocation, setAcceptPickupLocation] = useState<string>('')
+  const [auditOpen, setAuditOpen] = useState<{ id: number, logs: any[] } | null>(null)
 
   const minPickupLocal = useMemo(() => {
     const d = new Date(Date.now() + 5 * 60 * 1000)
@@ -56,6 +60,7 @@ export default function MyMarketplacePage() {
     const load = async () => {
       setLoading(true)
       try {
+        if (!isAuthBootstrapped || !isAuthenticated) { if (!cancelled) { setItems([]); setTxs([]) } return }
         const [myItemsRes, myTxRes] = await Promise.all([
           marketplaceApi.getMyItems(),
           marketplaceApi.getMyTransactions(),
@@ -74,7 +79,7 @@ export default function MyMarketplacePage() {
     }
     load()
     return () => { cancelled = true }
-  }, [])
+  }, [isAuthenticated, isAuthBootstrapped])
 
   // Initialize tab from query param (?tab=transactions)
   useEffect(() => {
@@ -85,6 +90,7 @@ export default function MyMarketplacePage() {
 
   const reloadItems = async () => {
     try {
+      if (!isAuthBootstrapped || !isAuthenticated) { setItems([]); return }
       const myItemsRes = await marketplaceApi.getMyItems()
       setItems((myItemsRes.data?.items || []) as MyItem[])
     } catch {}
@@ -253,6 +259,122 @@ export default function MyMarketplacePage() {
                     </button>
                   </>
                 )}
+                {t.as === 'seller' && t.status === 'accepted' && (
+                  <button
+                    className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                    onClick={async () => {
+                      try {
+                        await marketplaceApi.handoverSeller(t.id)
+                        setTxs(prev => prev.map(x => x.id === t.id ? { ...x, status: 'handed_over' } : x))
+                        showToast('Marked as handed over', 'success')
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.error || 'Failed'
+                        showToast(msg, 'error')
+                      }
+                    }}
+                  >
+                    Handed over
+                  </button>
+                )}
+                {t.as === 'buyer' && t.status === 'handed_over' && (
+                  <button
+                    className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                    onClick={async () => {
+                      try {
+                        await marketplaceApi.handoverBuyer(t.id)
+                        setTxs(prev => prev.map(x => x.id === t.id ? { ...x, status: 'received' } : x))
+                        showToast('Received confirmed', 'success')
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.error || 'Failed'
+                        showToast(msg, 'error')
+                      }
+                    }}
+                  >
+                    I Received
+                  </button>
+                )}
+                {t.as === 'buyer' && t.status === 'received' && t.transaction_type !== 'lend' && (
+                  <button
+                    className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                    onClick={async () => {
+                      try {
+                        await marketplaceApi.complete(t.id)
+                        setTxs(prev => prev.map(x => x.id === t.id ? { ...x, status: 'completed' } : x))
+                        showToast('Transaction completed', 'success')
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.error || 'Failed'
+                        showToast(msg, 'error')
+                      }
+                    }}
+                  >
+                    Complete
+                  </button>
+                )}
+                {t.as === 'buyer' && t.status === 'received' && t.transaction_type === 'lend' && (
+                  <button
+                    className="text-xs px-2 py-1 rounded border border-amber-200 text-amber-700 hover:bg-amber-50"
+                    onClick={async () => {
+                      try {
+                        await marketplaceApi.returnBuyer(t.id)
+                        setTxs(prev => prev.map(x => x.id === t.id ? { ...x, status: 'returned' } : x))
+                        showToast('Marked as returned', 'success')
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.error || 'Failed'
+                        showToast(msg, 'error')
+                      }
+                    }}
+                  >
+                    Mark Returned
+                  </button>
+                )}
+                {t.as === 'seller' && t.status === 'returned' && t.transaction_type === 'lend' && (
+                  <button
+                    className="text-xs px-2 py-1 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                    onClick={async () => {
+                      try {
+                        await marketplaceApi.returnSeller(t.id)
+                        setTxs(prev => prev.map(x => x.id === t.id ? { ...x, status: 'completed' } : x))
+                        showToast('Return confirmed', 'success')
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.error || 'Failed'
+                        showToast(msg, 'error')
+                      }
+                    }}
+                  >
+                    Confirm Received Back
+                  </button>
+                )}
+                <button
+                  className="text-xs px-2 py-1 rounded border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                  onClick={async () => {
+                    try {
+                      const res = await marketplaceApi.getAudit(t.id)
+                      const logs = (res.data?.audit || []) as any[]
+                      setAuditOpen({ id: t.id, logs })
+                    } catch {}
+                  }}
+                >
+                  History
+                </button>
+                {t.status !== 'completed' && t.status !== 'cancelled' && t.status !== 'disputed' && (
+                  <button
+                    className="text-xs px-2 py-1 rounded border border-rose-200 text-rose-700 hover:bg-rose-50"
+                    onClick={async () => {
+                      const reason = window.prompt('Describe the issue (required)') || ''
+                      if (!reason.trim()) return
+                      try {
+                        await marketplaceApi.dispute(t.id, reason.trim())
+                        setTxs(prev => prev.map(x => x.id === t.id ? { ...x, status: 'disputed' } : x))
+                        showToast('Reported to admin', 'success')
+                      } catch (e: any) {
+                        const msg = e?.response?.data?.error || 'Failed to report'
+                        showToast(msg, 'error')
+                      }
+                    }}
+                  >
+                    Report
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -302,7 +424,22 @@ export default function MyMarketplacePage() {
                     </div>
                   ))}
                 </div>
-                <input id="edit-images" name="edit_images" className="input-field" type="file" accept="image/*" multiple onChange={(e) => setUploadFiles(Array.from(e.target.files || []).slice(0,5))} />
+                <input id="edit-images" name="edit_images" className="input-field" type="file" accept="image/*" multiple onChange={(e) => setUploadFiles((prev) => {
+                  const next = [...prev, ...Array.from(e.target.files || [])]
+                  return next.slice(0,5)
+                })} />
+                {uploadFiles.length > 0 && (
+                  <div className="mt-2 grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {uploadFiles.map((f, i) => (
+                      <div key={`${f.name}-${i}`} className="relative">
+                        <img src={URL.createObjectURL(f)} className="w-20 h-20 rounded object-cover border" />
+                        <button type="button" className="absolute -top-2 -right-2 bg-white border rounded-full p-1" aria-label="Remove image" onClick={() => setUploadFiles((prev) => prev.filter((_, idx) => idx !== i))}>
+                          <X className="w-3 h-3" aria-hidden="true" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
@@ -366,6 +503,26 @@ export default function MyMarketplacePage() {
           }
         }}
       />
+      {auditOpen && (
+        <Modal
+          isOpen={!!auditOpen}
+          onClose={() => setAuditOpen(null)}
+          title={`Transaction History`}
+          footer={<button className="btn-secondary" onClick={() => setAuditOpen(null)}>Close</button>}
+        >
+          <div className="space-y-2 max-h-[60vh] overflow-auto">
+            {(auditOpen.logs || []).map((l, i) => (
+              <div key={i} className="text-sm flex items-start gap-2">
+                <span className="text-gray-500 min-w-[11ch]">{(l.created_at || '').replace('T',' ').slice(0,19)}</span>
+                <span className="font-medium capitalize">{l.action.replace(/_/g,' ')}</span>
+                <span className="text-gray-600">{l.from_status} → {l.to_status}</span>
+                {l.notes && <span className="text-gray-700">• {l.notes}</span>}
+              </div>
+            ))}
+            {auditOpen.logs?.length ? null : <div className="text-sm text-gray-600">No history yet.</div>}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

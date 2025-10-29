@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import api, { authApi } from '@/lib/api'
+import api, { authApi, getAccessToken } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 
 export default function VerifyEmailPage() {
@@ -33,7 +33,7 @@ export default function VerifyEmailPage() {
           const resp = await api.get('/api/auth/profile')
           const { id, username, role, email_verified, admin_verified, profile_picture } = resp.data || {}
           if (id) {
-            setAuth({ id, username, role, email_verified, admin_verified, profile_picture } as any, localStorage.getItem('access_token') || '', localStorage.getItem('refresh_token') || '')
+            setAuth({ id, username, role, email_verified, admin_verified, profile_picture } as any, getAccessToken() || '', '')
           }
         } catch {}
       } catch (err: any) {

@@ -24,12 +24,18 @@ export default function DashboardPage() {
   const [claimOpen, setClaimOpen] = useState(false)
   const [claimFor, setClaimFor] = useState<number | null>(null)
   const user = useAppStore((s) => s.user)
+  const isAuthBootstrapped = useAppStore((s) => s.isAuthBootstrapped)
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated)
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       setLoading(true)
       try {
+        if (!isAuthBootstrapped || !isAuthenticated) {
+          if (!cancelled) { setItems([]); setTxs([]); setReqs([]); setApps([]) }
+          return
+        }
         const [myItemsRes, myTxRes, myReqRes, myAppsRes] = await Promise.all([
           marketplaceApi.getMyItems(),
           marketplaceApi.getMyTransactions(),
@@ -54,7 +60,7 @@ export default function DashboardPage() {
     }
     load()
     return () => { cancelled = true }
-  }, [])
+  }, [isAuthenticated, isAuthBootstrapped])
 
   return (
     <div className="container-responsive py-8 md:py-10">

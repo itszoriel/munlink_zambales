@@ -16,6 +16,11 @@ from apps.api.utils import (
     validate_item_condition,
     validate_price,
     ValidationError,
+    # Tx audit helpers
+    log_tx_action,
+    require_tx_role,
+    assert_status,
+    TransitionError,
 )
 from apps.api.utils.file_handler import save_marketplace_image
 
@@ -658,3 +663,315 @@ def get_my_transactions():
     except Exception as e:
         return jsonify({'error': 'Failed to get transactions', 'details': str(e)}), 500
 
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/handover-seller', methods=['POST'])
+@jwt_required()
+def tx_handover_seller(transaction_id: int):
+    """Seller confirms item handed over to buyer. accepted -> handed_over"""
+    try:
+        user_id = get_jwt_identity()
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        # Guards
+        require_tx_role(tx, int(user_id), 'seller')
+        assert_status(tx, ['accepted'])
+
+        prev = tx.status
+        tx.status = 'handed_over'
+        tx.updated_at = datetime.utcnow()
+        # For lend, capture start date at handover
+        if tx.transaction_type == 'lend' and not tx.borrow_start_date:
+            tx.borrow_start_date = datetime.utcnow()
+
+        db.session.commit()
+        # Best-effort audit after main commit
+        try:
+            log_tx_action(
+                tx,
+                actor_id=int(user_id),
+                actor_role='seller',
+                action='handover_seller',
+                from_status=prev,
+                to_status=tx.status,
+                notes=(request.get_json(silent=True) or {}).get('notes'),
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent'),
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'message': 'Handover marked by seller', 'transaction': tx.to_dict()}), 200
+    except TransitionError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to mark handover', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/handover-buyer', methods=['POST'])
+@jwt_required()
+def tx_handover_buyer(transaction_id: int):
+    """Buyer confirms they received the item. handed_over -> received"""
+    try:
+        user_id = get_jwt_identity()
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        require_tx_role(tx, int(user_id), 'buyer')
+        assert_status(tx, ['handed_over'])
+
+        prev = tx.status
+        tx.status = 'received'
+        tx.updated_at = datetime.utcnow()
+        if tx.transaction_type == 'lend' and not tx.borrow_start_date:
+            tx.borrow_start_date = datetime.utcnow()
+
+        db.session.commit()
+        try:
+            log_tx_action(
+                tx,
+                actor_id=int(user_id),
+                actor_role='buyer',
+                action='handover_buyer',
+                from_status=prev,
+                to_status=tx.status,
+                notes=(request.get_json(silent=True) or {}).get('notes'),
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent'),
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'message': 'Buyer confirmed receipt', 'transaction': tx.to_dict()}), 200
+    except TransitionError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to confirm receipt', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/return-buyer', methods=['POST'])
+@jwt_required()
+def tx_return_buyer(transaction_id: int):
+    """Buyer indicates they returned a lent item. received -> returned (lend only)"""
+    try:
+        user_id = get_jwt_identity()
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        if tx.transaction_type != 'lend':
+            return jsonify({'error': 'Returns are only for lend transactions'}), 400
+        require_tx_role(tx, int(user_id), 'buyer')
+        assert_status(tx, ['received'])
+
+        prev = tx.status
+        tx.status = 'returned'
+        tx.return_date = datetime.utcnow()
+        tx.updated_at = datetime.utcnow()
+
+        db.session.commit()
+        try:
+            log_tx_action(
+                tx,
+                actor_id=int(user_id),
+                actor_role='buyer',
+                action='return_buyer',
+                from_status=prev,
+                to_status=tx.status,
+                notes=(request.get_json(silent=True) or {}).get('notes'),
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent'),
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'message': 'Return marked by buyer', 'transaction': tx.to_dict()}), 200
+    except TransitionError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to mark return', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/return-seller', methods=['POST'])
+@jwt_required()
+def tx_return_seller(transaction_id: int):
+    """Seller confirms they received the lent item back. returned -> completed (lend only)"""
+    try:
+        user_id = get_jwt_identity()
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        if tx.transaction_type != 'lend':
+            return jsonify({'error': 'Returns are only for lend transactions'}), 400
+        require_tx_role(tx, int(user_id), 'seller')
+        assert_status(tx, ['returned'])
+
+        prev = tx.status
+        tx.status = 'completed'
+        tx.completed_at = datetime.utcnow()
+        tx.updated_at = datetime.utcnow()
+        try:
+            item = Item.query.get(tx.item_id)
+            if item:
+                item.status = 'available'
+                item.is_active = True
+                item.updated_at = datetime.utcnow()
+        except Exception:
+            pass
+
+        db.session.commit()
+        try:
+            log_tx_action(
+                tx,
+                actor_id=int(user_id),
+                actor_role='seller',
+                action='return_seller',
+                from_status=prev,
+                to_status=tx.status,
+                notes=(request.get_json(silent=True) or {}).get('notes'),
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent'),
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'message': 'Return confirmed by seller', 'transaction': tx.to_dict()}), 200
+    except TransitionError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to confirm return', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/complete', methods=['POST'])
+@jwt_required()
+def tx_complete(transaction_id: int):
+    """Complete sell/donate after buyer received the item. received -> completed"""
+    try:
+        user_id = get_jwt_identity()
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        # Either party can complete after received for sell/donate to reduce friction
+        if tx.transaction_type not in ('sell', 'donate'):
+            return jsonify({'error': 'Complete is only for sell/donate'}), 400
+        assert_status(tx, ['received'])
+
+        prev = tx.status
+        tx.status = 'completed'
+        tx.completed_at = datetime.utcnow()
+        tx.updated_at = datetime.utcnow()
+        try:
+            item = Item.query.get(tx.item_id)
+            if item:
+                item.status = 'completed'
+                item.is_active = False
+                item.updated_at = datetime.utcnow()
+        except Exception:
+            pass
+
+        db.session.commit()
+        try:
+            log_tx_action(
+                tx,
+                actor_id=int(user_id) if user_id is not None else None,
+                actor_role='buyer' if int(user_id) == int(tx.buyer_id) else ('seller' if int(user_id) == int(tx.seller_id) else 'system'),
+                action='complete',
+                from_status=prev,
+                to_status=tx.status,
+                notes=(request.get_json(silent=True) or {}).get('notes'),
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent'),
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'message': 'Transaction completed', 'transaction': tx.to_dict()}), 200
+    except TransitionError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to complete transaction', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/dispute', methods=['POST'])
+@jwt_required()
+def tx_dispute(transaction_id: int):
+    """Either party can dispute a transaction; sets status to disputed and records notes."""
+    try:
+        user_id = get_jwt_identity()
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        # Only buyer or seller
+        if int(user_id) not in (int(tx.buyer_id), int(tx.seller_id)):
+            return jsonify({'error': 'Only buyer or seller can dispute'}), 403
+        data = request.get_json(silent=True) or {}
+        reason = (data.get('reason') or '').strip() or None
+        reported_user_id = data.get('reported_user_id')
+        try:
+            reported_user_id = int(reported_user_id) if reported_user_id is not None else None
+        except Exception:
+            reported_user_id = None
+
+        prev = tx.status
+        tx.status = 'disputed'
+        tx.updated_at = datetime.utcnow()
+
+        db.session.commit()
+        try:
+            log_tx_action(
+                tx,
+                actor_id=int(user_id),
+                actor_role='buyer' if int(user_id) == int(tx.buyer_id) else 'seller',
+                action='dispute',
+                from_status=prev,
+                to_status=tx.status,
+                notes=reason,
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get('User-Agent'),
+                metadata={
+                    'reported_user_id': (reported_user_id if reported_user_id in (tx.buyer_id, tx.seller_id) else (tx.seller_id if int(user_id) == int(tx.buyer_id) else tx.buyer_id))
+                },
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'message': 'Transaction disputed', 'transaction': tx.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to dispute transaction', 'details': str(e)}), 500
+
+
+@marketplace_bp.route('/transactions/<int:transaction_id>/audit', methods=['GET'])
+@jwt_required()
+def tx_audit(transaction_id: int):
+    """Return audit timeline. Visible to buyer, seller, or admin via role in JWT."""
+    try:
+        user_id = get_jwt_identity()
+        tx = Transaction.query.get(transaction_id)
+        if not tx:
+            return jsonify({'error': 'Transaction not found'}), 404
+        # Allow buyer or seller; admins handled at gateway/role level elsewhere.
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        if uid not in (tx.buyer_id, tx.seller_id):
+            # Still allow if role claim is admin (if present)
+            try:
+                from flask_jwt_extended import get_jwt
+                claims = get_jwt() or {}
+                role = claims.get('role')
+                if role not in ('admin', 'municipal_admin'):
+                    return jsonify({'error': 'Forbidden'}), 403
+            except Exception:
+                return jsonify({'error': 'Forbidden'}), 403
+
+        # Sort by created_at ascending
+        logs = [l.to_dict() for l in sorted(tx.audit_logs, key=lambda x: x.created_at or datetime.utcnow())]
+        return jsonify({'transaction': tx.to_dict(), 'audit': logs}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to get audit timeline', 'details': str(e)}), 500

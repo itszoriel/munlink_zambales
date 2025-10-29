@@ -29,6 +29,7 @@ export default function MarketplacePage() {
   const [creatingTxId, setCreatingTxId] = useState<number | null>(null)
   const [myPending, setMyPending] = useState<Record<number, string>>({})
   const isViewingMismatch = !!userMunicipalityId && !!selectedMunicipality?.id && userMunicipalityId !== selectedMunicipality.id
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated)
 
   const params = useMemo(() => {
     const p: any = { status: 'available', page: 1, per_page: 24 }
@@ -47,7 +48,7 @@ export default function MarketplacePage() {
         if (!cancelled) setItems(res.data?.items || [])
         // Also load my transactions to reflect requested state (only if authenticated)
         try {
-          if (localStorage.getItem('access_token')) {
+          if (isAuthenticated) {
             const tx = await marketplaceApi.getMyTransactions()
             const asBuyer = (tx as any)?.data?.as_buyer || (tx as any)?.as_buyer || []
             const pendingMap: Record<number, string> = {}
@@ -264,7 +265,20 @@ export default function MarketplacePage() {
               </div>
               <div className="sm:col-span-2">
                 <label htmlFor="post-images" className="block text-sm font-medium mb-1">Images (max 5)</label>
-                <input id="post-images" name="post_images" className="input-field" type="file" accept="image/*" multiple onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0,5))} />
+                <input id="post-images" name="post_images" className="input-field" type="file" accept="image/*" multiple onChange={(e) => setFiles((prev) => {
+                  const next = [...prev, ...Array.from(e.target.files || [])]
+                  return next.slice(0,5)
+                })} />
+                {files.length > 0 && (
+                  <div className="mt-2 grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {files.map((f, i) => (
+                      <div key={`${f.name}-${i}`} className="relative">
+                        <img src={URL.createObjectURL(f)} alt={f.name} className="w-full h-20 object-cover rounded border" />
+                        <button type="button" className="absolute -top-2 -right-2 bg-white border rounded-full p-1 text-xs" aria-label="Remove image" onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2">
@@ -285,13 +299,7 @@ export default function MarketplacePage() {
                     const id = res.data?.item?.id
                     if (id && files.length) {
                       for (const f of files) {
-                        const fd = new FormData()
-                        fd.set('file', f)
-                        await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/marketplace/items/${id}/upload`, {
-                          method: 'POST',
-                          headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-                          body: fd,
-                        })
+                        await marketplaceApi.uploadItemImage(id, f)
                       }
                     }
                     setOpen(false)

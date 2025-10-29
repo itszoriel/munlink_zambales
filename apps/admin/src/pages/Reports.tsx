@@ -6,6 +6,8 @@ export default function Reports() {
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<any>(null)
   const [range, setRange] = useState<string>('last_30_days')
+  const [selectedMunicipality, setSelectedMunicipality] = useState<any | null>(null)
+  const [showMuniModal, setShowMuniModal] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -44,7 +46,8 @@ export default function Reports() {
   const metrics = useMemo(() => ([
     { label: 'Total Users', value: String(report?.users?.total_users ?? '—'), change: '+0%', trend: 'up', icon: '👥', color: 'ocean' },
     { label: 'Active Listings', value: String(report?.marketplace?.total_items ?? '—'), change: '+0%', trend: 'up', icon: '🛍️', color: 'forest' },
-    { label: 'Documents Issued', value: String(report?.documents?.issued_total ?? '—'), change: '+0%', trend: 'up', icon: '📄', color: 'purple' },
+    // Backend returns { total_requests, top_requested }. Use total_requests as the displayed count
+    { label: 'Documents Issued', value: String((report?.documents?.total_requests ?? report?.documents?.issued_total) ?? '—'), change: '+0%', trend: 'up', icon: '📄', color: 'purple' },
     { label: 'Active Announcements', value: String(report?.announcements?.active_announcements ?? '—'), change: '+0%', trend: 'up', icon: '📢', color: 'sunset' },
   ] as const), [report])
 
@@ -99,19 +102,57 @@ export default function Reports() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-        <div className="bg-white/70 backdrop-blur-xl rounded-3xl shadow-xl border border-white/50 overflow-hidden">
-          <div className="px-6 py-5 border-b border-neutral-200"><h2 className="text-xl font-bold text-neutral-900">User Growth</h2><p className="text-sm text-neutral-600 mt-1">New registrations over time</p></div>
-          <div className="p-6">
+        <div className="overflow-hidden rounded-3xl shadow-xl border border-white/50 bg-gradient-to-br from-ocean-600 via-ocean-500 to-forest-600">
+          <div className="px-6 py-5 border-b border-white/20">
+            <h2 className="text-xl font-bold text-white">User Growth</h2>
+            <p className="text-sm text-white/80 mt-1">New registrations over time</p>
+          </div>
+          <div className="p-6 bg-white/10">
             {growth.length === 0 ? (
-              <div className="h-64 bg-gradient-to-br from-ocean-50 to-forest-50 rounded-2xl flex items-center justify-center text-sm text-neutral-600">No data</div>
+              <div className="h-64 rounded-2xl flex items-center justify-center text-sm text-white/80">No data</div>
             ) : (
-              <div className="space-y-2 max-h-64 overflow-auto">
-                {growth.map((g: any) => (
-                  <div key={g.day} className="flex items-center justify-between text-sm">
-                    <span className="text-neutral-700">{g.day}</span>
-                    <span className="font-semibold text-neutral-900">{g.count}</span>
-                  </div>
-                ))}
+              <div className="h-64 w-full">
+                {(() => {
+                  const padding = 24
+                  const width = 640
+                  const height = 240
+                  const points = growth.map((g: any, i: number) => ({ x: i, y: Number(g.count || 0), label: g.day }))
+                  const maxY = Math.max(1, ...points.map(p => p.y))
+                  const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0
+                  const scaleX = (i: number) => padding + i * stepX
+                  const scaleY = (v: number) => padding + (height - padding * 2) * (1 - (v / maxY))
+                  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${scaleX(p.x)} ${scaleY(p.y)}`).join(' ')
+                  const areaD = `${pathD} L ${scaleX(points[points.length - 1]?.x || 0)} ${scaleY(0)} L ${scaleX(points[0]?.x || 0)} ${scaleY(0)} Z`
+                  const ticks = 4
+                  const yTicks = Array.from({ length: ticks + 1 }).map((_, i) => Math.round((maxY / ticks) * i))
+                  return (
+                    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full">
+                      <defs>
+                        <linearGradient id="growth-fill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="rgba(255,255,255,0.6)" />
+                          <stop offset="100%" stopColor="rgba(255,255,255,0.05)" />
+                        </linearGradient>
+                      </defs>
+                      {yTicks.map((t, i) => (
+                        <g key={i}>
+                          <line x1={padding} y1={scaleY(t)} x2={width - padding} y2={scaleY(t)} stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
+                          <text x={8} y={scaleY(t) + 4} fontSize="10" fill="rgba(255,255,255,0.7)">{t}</text>
+                        </g>
+                      ))}
+                      <path d={areaD} fill="url(#growth-fill)" />
+                      <path d={pathD} fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" />
+                      {points.map((p, i) => (
+                        <circle key={i} cx={scaleX(p.x)} cy={scaleY(p.y)} r="3" fill="#fff" />
+                      ))}
+                      {points.length > 0 && (
+                        <>
+                          <text x={padding} y={height - 4} fontSize="10" fill="rgba(255,255,255,0.85)">{points[0].label}</text>
+                          <text x={width - padding - 40} y={height - 4} fontSize="10" fill="rgba(255,255,255,0.85)" textAnchor="end">{points[points.length - 1].label}</text>
+                        </>
+                      )}
+                    </svg>
+                  )
+                })()}
               </div>
             )}
           </div>
@@ -173,7 +214,7 @@ export default function Reports() {
           ) : (
             municipalities.map((m: any) => (
               <div key={m.name} className="p-4 bg-neutral-50 rounded-2xl hover:bg-ocean-50 transition-colors">
-                <div className="flex items-center justify-between mb-3"><h3 className="font-bold text-neutral-900">{m.name}</h3><button className="text-sm text-ocean-600 hover:text-ocean-700 font-medium">View Details →</button></div>
+                <div className="flex items-center justify-between mb-3"><h3 className="font-bold text-neutral-900">{m.name}</h3><button className="text-sm text-ocean-600 hover:text-ocean-700 font-medium" onClick={() => { setSelectedMunicipality(m); setShowMuniModal(true) }}>View Details →</button></div>
                 <div className="grid grid-cols-3 gap-4">
                   <div><p className="text-xs text-neutral-600 mb-1">Users</p><p className="text-xl font-bold text-neutral-900">{m.users}</p></div>
                   <div><p className="text-xs text-neutral-600 mb-1">Listings</p><p className="text-xl font-bold text-neutral-900">{m.listings}</p></div>
@@ -184,6 +225,36 @@ export default function Reports() {
           )}
         </div>
       </div>
+
+      {showMuniModal && selectedMunicipality && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setShowMuniModal(false) }}>
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowMuniModal(false)} />
+          <div className="relative bg-white w-[92%] max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl border p-6" tabIndex={-1} autoFocus>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-neutral-900">{selectedMunicipality.name} • Performance</h3>
+              <button className="text-neutral-500 hover:text-neutral-700" onClick={() => setShowMuniModal(false)} aria-label="Close">✕</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="rounded-xl border p-4 bg-neutral-50">
+                <div className="text-xs text-neutral-600 mb-1">Users</div>
+                <div className="text-2xl font-bold text-neutral-900">{selectedMunicipality.users}</div>
+              </div>
+              <div className="rounded-xl border p-4 bg-neutral-50">
+                <div className="text-xs text-neutral-600 mb-1">Listings</div>
+                <div className="text-2xl font-bold text-neutral-900">{selectedMunicipality.listings}</div>
+              </div>
+              <div className="rounded-xl border p-4 bg-neutral-50">
+                <div className="text-xs text-neutral-600 mb-1">Documents</div>
+                <div className="text-2xl font-bold text-neutral-900">{selectedMunicipality.documents}</div>
+              </div>
+            </div>
+            <div className="mt-6 text-sm text-neutral-600">Range: {range.replaceAll('_', ' ')}</div>
+            <div className="mt-4 flex items-center justify-end">
+              <button className="px-4 py-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm" onClick={() => setShowMuniModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

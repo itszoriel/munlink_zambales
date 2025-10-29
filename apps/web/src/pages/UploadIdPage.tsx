@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { authApi } from '@/lib/api'
+import { authApi, getAccessToken } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 
 export default function UploadIdPage() {
@@ -40,8 +40,8 @@ export default function UploadIdPage() {
       if (response.data?.user) {
         setAuth(
           response.data.user,
-          localStorage.getItem('access_token') || '',
-          localStorage.getItem('refresh_token') || ''
+          getAccessToken() || '',
+          ''
         )
       }
       

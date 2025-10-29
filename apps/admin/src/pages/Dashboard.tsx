@@ -21,6 +21,17 @@ export default function Dashboard() {
   ])
   const [recentAnnouncements, setRecentAnnouncements] = useState<any[]>([])
 
+  // Map color token to explicit Tailwind gradient classes so JIT includes them
+  const gradientClass = (color: 'ocean'|'forest'|'sunset'|'red') => {
+    switch (color) {
+      case 'ocean': return 'from-ocean-400 to-ocean-600'
+      case 'forest': return 'from-forest-400 to-forest-600'
+      case 'sunset': return 'from-sunset-400 to-sunset-600'
+      case 'red': return 'from-red-400 to-red-600'
+      default: return 'from-neutral-400 to-neutral-600'
+    }
+  }
+
   // Quick actions removed per design update
 
   useEffect(() => {
@@ -275,7 +286,15 @@ export default function Dashboard() {
                       <span className="text-sm font-bold text-neutral-900">{item.value}</span>
                     </div>
                     <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
-                      <div className={`h-full bg-gradient-to-r from-${item.color}-400 to-${item.color}-600 rounded-full transition-all duration-1000`} style={{ width: `${(item.value / item.max) * 100}%` }} />
+                      {(() => {
+                        const pct = Math.min(100, Math.max(0, (item.max ? (item.value / item.max) * 100 : 0)))
+                        return (
+                          <div
+                            className={`h-full bg-gradient-to-r ${gradientClass(item.color)} rounded-full transition-[width] duration-700 ease-out`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        )
+                      })()}
                     </div>
                   </div>
                 ))}

@@ -7,13 +7,125 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 })
 
+// In-memory access token (no localStorage)
+let accessToken: string | null = null
+let refreshPromise: Promise<string | null> | null = null
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+export const getAccessToken = (): string | null => accessToken
+export const setAccessToken = (token: string | null) => {
+  accessToken = token
+  try {
+    if (token) sessionStorage.setItem('access_token', token)
+    else sessionStorage.removeItem('access_token')
+  } catch {}
+}
+export const clearAccessToken = () => {
+  accessToken = null
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
+  try { sessionStorage.removeItem('access_token') } catch {}
+}
+
+export const setSessionAccessToken = (token: string | null) => {
+  setAccessToken(token)
+  if (token) scheduleRefresh(token)
+}
+
+function base64UrlDecode(input: string): string {
+  const pad = (str: string) => str + '='.repeat((4 - (str.length % 4)) % 4)
+  const b64 = pad(input).replace(/-/g, '+').replace(/_/g, '/')
+  try {
+    return decodeURIComponent(
+      atob(b64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+  } catch {
+    return ''
+  }
+}
+
+function decodeJwt(token: string): any | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const payload = JSON.parse(base64UrlDecode(parts[1]) || 'null')
+    return payload
+  } catch {
+    return null
+  }
+}
+
+function scheduleRefresh(token: string) {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
+  const payload = decodeJwt(token)
+  const expSec = payload?.exp
+  if (!expSec || typeof expSec !== 'number') return
+  const nowSec = Math.floor(Date.now() / 1000)
+  const bufferSec = 60 // refresh 60s before expiry to account for skew
+  const delayMs = Math.max((expSec - nowSec - bufferSec) * 1000, 0)
+  refreshTimer = setTimeout(() => {
+    // fire and forget
+    void doRefresh().catch(() => {})
+  }, delayMs)
+}
+
+async function doRefresh(): Promise<string | null> {
+  try {
+    const resp = await axios.post(
+      `${API_BASE_URL}/api/auth/refresh`,
+      {},
+      { withCredentials: true, validateStatus: () => true }
+    )
+    if (resp.status !== 200) return null
+    const newToken: string | undefined = resp?.data?.access_token
+    if (newToken) {
+      setAccessToken(newToken)
+      scheduleRefresh(newToken)
+      return newToken
+    }
+  } catch {
+    // ignore; caller handles logout
+  }
+  return null
+}
+
+export async function bootstrapAuth(): Promise<boolean> {
+  // First, hydrate from sessionStorage if present for immediate UX
+  try {
+    const saved = sessionStorage.getItem('access_token')
+    if (saved) {
+      setAccessToken(saved)
+      scheduleRefresh(saved)
+      // Attempt background refresh to extend session
+      void doRefresh()
+      return true
+    }
+  } catch {}
+  // Otherwise, attempt to hydrate from refresh cookie once on app load
+  const token = await doRefresh()
+  return !!token
+}
+
 // Add auth token to requests
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+api.interceptors.request.use((config: any) => {
+  if (!config.headers) config.headers = {}
+  if (accessToken) {
+    try {
+      config.headers['Authorization'] = `Bearer ${accessToken}`
+    } catch {
+      ;(config.headers as any).Authorization = `Bearer ${accessToken}`
+    }
   }
   return config
 })
@@ -22,29 +134,26 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config
+    const originalRequest = error.config || {}
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true
-
       try {
-        const refreshToken = localStorage.getItem('refresh_token')
-        if (refreshToken) {
-          const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, {}, {
-            headers: { Authorization: `Bearer ${refreshToken}` },
-          })
-
-          const { access_token } = response.data
-          localStorage.setItem('access_token', access_token)
-
-          originalRequest.headers.Authorization = `Bearer ${access_token}`
+        refreshPromise = refreshPromise || doRefresh()
+        const newToken = await refreshPromise.finally(() => { refreshPromise = null })
+        if (newToken) {
+          originalRequest.headers = originalRequest.headers || {}
+          try {
+            originalRequest.headers['Authorization'] = `Bearer ${newToken}`
+          } catch {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`
+          }
           return api(originalRequest)
         }
-      } catch (refreshError) {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
-      }
+      } catch {}
+      // If refresh failed, clear and redirect to login
+      clearAccessToken()
+      window.location.href = '/login'
     }
 
     // Handle role mismatch: clear tokens and redirect to login
@@ -52,10 +161,13 @@ api.interceptors.response.use(
       try {
         const data: any = error.response?.data
         if (data?.code === 'ROLE_MISMATCH') {
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          localStorage.removeItem('munlink:role')
-          localStorage.removeItem('munlink:user')
+          try {
+            // best-effort client cleanup; cookies cleared server-side on logout
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem('munlink:role')
+              localStorage.removeItem('munlink:user')
+            }
+          } catch {}
           window.location.href = '/login'
           return Promise.reject(error)
         }
@@ -117,6 +229,14 @@ export const marketplaceApi = {
   proposeTransaction: (id: number, data: { pickup_at: string, pickup_location: string }) => api.post(`/api/marketplace/transactions/${id}/propose`, data),
   confirmTransaction: (id: number) => api.post(`/api/marketplace/transactions/${id}/confirm`),
   buyerRejectProposal: (id: number) => api.post(`/api/marketplace/transactions/${id}/reject-buyer`),
+  // Dual-confirmation handover/returns
+  handoverSeller: (id: number, notes?: string) => api.post(`/api/marketplace/transactions/${id}/handover-seller`, { notes }),
+  handoverBuyer: (id: number, notes?: string) => api.post(`/api/marketplace/transactions/${id}/handover-buyer`, { notes }),
+  returnBuyer: (id: number, notes?: string) => api.post(`/api/marketplace/transactions/${id}/return-buyer`, { notes }),
+  returnSeller: (id: number, notes?: string) => api.post(`/api/marketplace/transactions/${id}/return-seller`, { notes }),
+  complete: (id: number, notes?: string) => api.post(`/api/marketplace/transactions/${id}/complete`, { notes }),
+  dispute: (id: number, reason: string) => api.post(`/api/marketplace/transactions/${id}/dispute`, { reason }),
+  getAudit: (id: number) => api.get(`/api/marketplace/transactions/${id}/audit`),
   // Legacy accept (kept for compatibility in case other screens still call it)
   acceptTransaction: (id: number, data: { pickup_at: string, pickup_location: string }) => api.post(`/api/marketplace/transactions/${id}/accept`, data),
   rejectTransaction: (id: number) => api.post(`/api/marketplace/transactions/${id}/reject`),

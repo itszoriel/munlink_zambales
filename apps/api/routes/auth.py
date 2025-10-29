@@ -12,7 +12,9 @@ from flask_jwt_extended import (
     jwt_required, 
     get_jwt_identity, 
     get_jwt,
-    decode_token
+    decode_token,
+    set_refresh_cookies,
+    unset_jwt_cookies,
 )
 from datetime import datetime, timedelta
 try:
@@ -246,12 +248,16 @@ def login():
             additional_claims={"role": user.role}
         )
         
-        return jsonify({
+        from flask import jsonify
+        resp = jsonify({
             'message': 'Login successful',
             'access_token': access_token,
-            'refresh_token': refresh_token,
+            # refresh token is set via HttpOnly cookie for security
             'user': user.to_dict(include_sensitive=True, include_municipality=True)
-        }), 200
+        })
+        # Set refresh token in HttpOnly cookie (domain/path controlled by config)
+        set_refresh_cookies(resp, refresh_token)
+        return resp, 200
     
     except Exception as e:
         return jsonify({'error': 'Login failed', 'details': str(e)}), 500
@@ -273,7 +279,10 @@ def logout():
         # Add token to blacklist
         TokenBlacklist.add_token_to_blacklist(jti, token_type, user_id, expires_at)
         
-        return jsonify({'message': 'Logout successful'}), 200
+        resp = jsonify({'message': 'Logout successful'})
+        # Clear JWT cookies (access/refresh) if present
+        unset_jwt_cookies(resp)
+        return resp, 200
     
     except Exception as e:
         return jsonify({'error': 'Logout failed', 'details': str(e)}), 500

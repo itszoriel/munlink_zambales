@@ -2,8 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import "../../packages/ui/src/styles.css";
-
 :root {
   --color-primary: #059669;
   --color-primary-foreground: #ffffff;

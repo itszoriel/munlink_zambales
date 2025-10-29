@@ -15,6 +15,7 @@ import Reports from './pages/Reports'
 import Profile from './pages/Profile'
 import Announcements from './pages/Announcements'
 import Issues from './pages/Issues'
+import TransactionsPage from './pages/Transactions'
 import VerifyTicket from './pages/VerifyTicket'
 
 export default function App() {
@@ -98,6 +99,16 @@ export default function App() {
             <ProtectedRoute>
               <AdminLayout>
                 <Marketplace />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/transactions"
+          element={
+            <ProtectedRoute>
+              <AdminLayout>
+                <TransactionsPage />
               </AdminLayout>
             </ProtectedRoute>
           }

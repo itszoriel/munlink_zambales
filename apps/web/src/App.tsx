@@ -1,4 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
+import { bootstrapAuth, getAccessToken, authApi } from '@/lib/api'
+import { useAppStore } from '@/lib/store'
+
+let hasBootstrappedAuth = false
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
@@ -20,6 +25,30 @@ import ProfilePage from './pages/ProfilePage'
 import MyMarketplacePage from './pages/MyMarketplacePage'
 
 function App() {
+  const setAuth = useAppStore((s) => s.setAuth)
+  const setAuthBootstrapped = useAppStore((s) => s.setAuthBootstrapped)
+  useEffect(() => {
+    let cancelled = false
+    const init = async () => {
+      if (hasBootstrappedAuth) { setAuthBootstrapped(true); return }
+      try {
+        await bootstrapAuth()
+        const token = getAccessToken()
+        if (token) {
+          try {
+            const resp = await authApi.getProfile()
+            if (!cancelled && resp?.data) {
+              setAuth(resp.data, token, '')
+            }
+          } catch {}
+        }
+      } catch {}
+      hasBootstrappedAuth = true
+      if (!cancelled) setAuthBootstrapped(true)
+    }
+    void init()
+    return () => { cancelled = true }
+  }, [setAuth])
   return (
     <BrowserRouter>
       <Routes>

@@ -255,6 +255,16 @@ export const marketplaceApi = {
     apiClient.get('/api/marketplace/items', { params }).then(res => res.data),
 }
 
+// Transactions (Admin)
+export const transactionsAdminApi = {
+  list: (params: { status?: string; page?: number; per_page?: number } = {}): Promise<ApiResponse<{ transactions: any[]; total: number; page: number; pages: number; per_page: number }>> =>
+    apiClient.get('/api/admin/transactions', { params }).then(res => res.data),
+  get: (id: number): Promise<ApiResponse<{ transaction: any; audit: any[] }>> =>
+    apiClient.get(`/api/admin/transactions/${id}`).then(res => res.data),
+  setStatus: (id: number, status: 'under_review' | 'resolved' | 'confirmed_scam', notes?: string): Promise<ApiResponse<{ message: string }>> =>
+    apiClient.put(`/api/admin/transactions/${id}/status`, { status, notes }).then(res => res.data),
+}
+
 // Announcements API
 export const announcementApi = {
   // Get all announcements

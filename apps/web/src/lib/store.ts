@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { authApi } from './api'
+import { setSessionAccessToken as setApiSessionAccessToken, getAccessToken as getApiAccessToken } from './api'
 
 export type Municipality = {
   id: number
@@ -28,6 +30,8 @@ type AppState = {
   accessToken?: string
   refreshToken?: string
   isAuthenticated: boolean
+  isAuthBootstrapped: boolean
+  setAuthBootstrapped: (v: boolean) => void
   emailVerified: boolean
   adminVerified: boolean
   setAuth: (user: User, accessToken: string, refreshToken: string) => void
@@ -38,8 +42,7 @@ type AppState = {
 export const useAppStore = create<AppState>((set) => {
   const storedRole = (typeof window !== 'undefined' && (localStorage.getItem('munlink:role') as any)) || 'public'
   const storedUser = typeof window !== 'undefined' ? localStorage.getItem('munlink:user') : null
-  const storedAccess = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
-  const storedRefresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null
+  // no persisted tokens; use in-memory + sessionStorage handled in api layer
 
   let initialUser: User | undefined
   try {
@@ -53,7 +56,7 @@ export const useAppStore = create<AppState>((set) => {
 
   // Function to refresh user profile data
   const refreshUserProfile = async () => {
-    if (typeof window !== 'undefined' && storedAccess) {
+    if (typeof window !== 'undefined' && getApiAccessToken()) {
       try {
         const { authApi } = await import('./api')
         const response = await authApi.getProfile()
@@ -74,7 +77,7 @@ export const useAppStore = create<AppState>((set) => {
   }
 
   // Refresh profile on app load if user is authenticated
-  if (typeof window !== 'undefined' && storedAccess && initialUser) {
+  if (typeof window !== 'undefined' && getApiAccessToken() && initialUser) {
     // Check if user data is missing ID document fields (old data)
     if (!initialUser.valid_id_front && !initialUser.valid_id_back && !initialUser.selfie_with_id) {
       refreshUserProfile()
@@ -90,27 +93,29 @@ export const useAppStore = create<AppState>((set) => {
       set({ role: r, isAuthenticated: r !== 'public' })
     },
     user: initialUser,
-    accessToken: storedAccess || undefined,
-    refreshToken: storedRefresh || undefined,
-    isAuthenticated: !!storedAccess && storedRole !== 'public',
+    accessToken: undefined,
+    refreshToken: undefined,
+    isAuthenticated: !!getApiAccessToken() && storedRole !== 'public',
+    isAuthBootstrapped: false,
+    setAuthBootstrapped: (v) => set({ isAuthBootstrapped: v }),
     emailVerified,
     adminVerified,
-    setAuth: (user, accessToken, refreshToken) => {
+    setAuth: (user, accessToken, _refreshToken) => {
       const mappedRole: 'public' | 'resident' | 'admin' = user.role === 'municipal_admin' ? 'admin' : (user.role as any)
       // Only allow resident sessions in web app
       if (mappedRole !== 'resident') {
         return
       }
       if (typeof window !== 'undefined') {
-        localStorage.setItem('access_token', accessToken)
-        localStorage.setItem('refresh_token', refreshToken)
         localStorage.setItem('munlink:role', mappedRole)
         localStorage.setItem('munlink:user', JSON.stringify(user))
       }
+      // hydrate in-memory token and schedule proactive refresh
+      setApiSessionAccessToken(accessToken)
       set({
         user,
         accessToken,
-        refreshToken,
+        refreshToken: undefined,
         role: mappedRole,
         isAuthenticated: true,
         emailVerified: !!user.email_verified,
@@ -122,12 +127,13 @@ export const useAppStore = create<AppState>((set) => {
       set({ role: r, isAuthenticated: true })
     },
     logout: () => {
+      // best-effort server logout to clear cookie and blacklist token
+      try { void authApi.logout() } catch {}
       if (typeof window !== 'undefined') {
         localStorage.removeItem('munlink:role')
         localStorage.removeItem('munlink:user')
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
       }
+      setApiSessionAccessToken(null)
       set({ role: 'public', isAuthenticated: false, user: undefined, accessToken: undefined, refreshToken: undefined, emailVerified: false, adminVerified: false })
     },
   }

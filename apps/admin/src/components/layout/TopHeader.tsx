@@ -130,9 +130,9 @@ export default function TopHeader({ sidebarCollapsed, onOpenMobile }: TopHeaderP
         </div>
       </div>
       {/* Mobile slide-over for account actions */}
-      <div className={`fixed inset-0 z-50 md:hidden ${mobileMenuOpen ? '' : 'hidden'}`}>
+      <div className={`fixed inset-0 z-[90] md:hidden ${mobileMenuOpen ? '' : 'hidden'}`}>
         <div className="absolute inset-0 bg-black/40" onClick={() => setMobileMenuOpen(false)} />
-        <aside className="absolute right-0 top-0 h-full w-[85%] xxs:w-[80%] xs:w-[70%] bg-white p-4 flex flex-col shadow-2xl border-l border-neutral-200">
+        <aside className="absolute right-0 top-0 h-full w-[85%] xxs:w-[80%] xs:w-[70%] bg-white p-4 pb-24 flex flex-col shadow-2xl border-l border-neutral-200">
           <div className="flex items-center gap-3 p-3 border-b border-neutral-200">
             {user?.profile_picture ? (
               <img src={resolveImageUrl(user.profile_picture)} alt="Profile" className="w-10 h-10 rounded-full object-cover" />
@@ -148,7 +148,7 @@ export default function TopHeader({ sidebarCollapsed, onOpenMobile }: TopHeaderP
           </div>
           <div className="py-2 flex-1">
             <button onClick={() => { setMobileMenuOpen(false); goToProfile(); }} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-50 transition-colors"><User className="w-4 h-4" aria-hidden="true" /><span className="text-sm font-medium text-neutral-700">My Profile</span></button>
-            <a href="/" target="_blank" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-50 transition-colors"><Globe className="w-4 h-4" aria-hidden="true" /><span className="text-sm font-medium text-neutral-700">View Public Site</span></a>
+            <a href={PUBLIC_SITE_URL} target="_blank" rel="noreferrer" className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-neutral-50 transition-colors"><Globe className="w-4 h-4" aria-hidden="true" /><span className="text-sm font-medium text-neutral-700">View Public Site</span></a>
           </div>
           <div className="p-4 border-t border-neutral-200">
             <button onClick={() => { setMobileMenuOpen(false); handleLogout(); }} className="w-full btn bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-medium">Logout</button>

@@ -13,7 +13,6 @@ const navItems = [
   { icon: 'residents', label: 'Residents', path: '/residents', badge: null },
   { icon: 'benefits', label: 'Benefits', path: '/benefits', badge: null },
   { icon: 'requests', label: 'Requests', path: '/requests', badge: null },
-  { icon: 'requests', label: 'Verify Ticket', path: '/verify-ticket', badge: null },
   { icon: 'issues', label: 'Issues', path: '/issues', badge: null },
   { icon: 'marketplace', label: 'Marketplace', path: '/marketplace', badge: null },
   { icon: 'announcements', label: 'Announcements', path: '/announcements', badge: null },
@@ -27,6 +26,7 @@ function IconFor(code: string, className = 'w-5 h-5') {
     case 'benefits': return <Gift className={className} aria-hidden="true" />
     case 'requests': return <FileText className={className} aria-hidden="true" />
     case 'issues': return <AlertTriangle className={className} aria-hidden="true" />
+    case 'transactions': return <ShoppingBag className={className} aria-hidden="true" />
     case 'marketplace': return <ShoppingBag className={className} aria-hidden="true" />
     case 'announcements': return <Megaphone className={className} aria-hidden="true" />
     case 'reports': return <BarChart3 className={className} aria-hidden="true" />

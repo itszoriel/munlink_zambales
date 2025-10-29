@@ -43,6 +43,8 @@ export default function BenefitsPage() {
       setLoading(true)
       try {
         if (tab === 'applications') {
+          const isAuthenticated = !!useAppStore.getState().isAuthenticated
+          if (!isAuthenticated) { if (!cancelled) setApplications([]); return }
           const my = await benefitsApi.getMyApplications()
           if (!cancelled) setApplications(my.data?.applications || [])
         } else {

@@ -544,13 +544,19 @@ function CreateAnnouncementModal({ onClose, onCreate, loading }: CreateAnnouncem
                 type="file"
                 accept="image/*"
                 multiple
-                onChange={(e) => setFiles(Array.from(e.target.files || []).slice(0, 5))}
+                onChange={(e) => setFiles((prev) => {
+                  const next = [...prev, ...Array.from(e.target.files || [])]
+                  return next.slice(0, 5)
+                })}
                 className="w-full"
               />
               {files.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 grid grid-cols-3 sm:grid-cols-5 gap-2">
                   {files.map((f, i) => (
-                    <div key={i} className="text-xs px-2 py-1 bg-neutral-100 rounded">{f.name}</div>
+                    <div key={`${f.name}-${i}`} className="relative">
+                      <img src={URL.createObjectURL(f)} alt={f.name} className="w-full h-20 object-cover rounded border" />
+                      <button type="button" className="absolute -top-2 -right-2 bg-white border rounded-full p-1 text-xs" aria-label="Remove image" onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}>✕</button>
+                    </div>
                   ))}
                 </div>
               )}
