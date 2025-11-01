@@ -1,106 +1,12 @@
 /**
  * MunLink Zambales - Admin API Client
- * Centralized API client with authentication and error handling
+ * Centralized API client powered by shared @munlink/api-client
  */
-import axios from 'axios'
-import type { AxiosResponse, AxiosError, AxiosInstance } from 'axios'
+import api, { setSessionAccessToken } from '@munlink/api-client'
+import type { AxiosError } from 'axios'
 import { useAdminStore } from './store'
 
-// Avoid type dependency on @types/node for simple environment access in browser builds
-declare const process: any
-
-// API Configuration
-const API_BASE_URL =
-  (import.meta as any).env?.VITE_API_BASE_URL ||
-  (import.meta as any).env?.VITE_API_URL ||
-  (typeof process !== 'undefined' ? (process as any).env?.NEXT_PUBLIC_API_URL : undefined) ||
-  'http://localhost:5000'
-
-// Create axios instance
-const apiClient: AxiosInstance = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
-
-// Request interceptor to add auth token
-apiClient.interceptors.request.use(
-  (config) => {
-    const { accessToken } = useAdminStore.getState()
-    console.log('DEBUG: API Request - Access Token:', accessToken ? accessToken.substring(0, 50) + '...' : 'None')
-    console.log('DEBUG: API Request - Full Token Length:', accessToken ? accessToken.length : 0)
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`
-      console.log('DEBUG: API Request - Authorization header set')
-    } else {
-      console.log('DEBUG: API Request - No access token available')
-    }
-    return config
-  },
-  (error) => {
-    return Promise.reject(error)
-  }
-)
-
-// Response interceptor for token refresh and richer error logging
-apiClient.interceptors.response.use(
-  (response: AxiosResponse) => {
-    return response
-  },
-  async (error: AxiosError) => {
-    const originalRequest = error.config as any
-
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true
-
-      try {
-        const { refreshToken, setTokens } = useAdminStore.getState()
-        if (refreshToken) {
-          const response = await axios.post(`${API_BASE_URL}/api/auth/refresh`, undefined, {
-            headers: { Authorization: `Bearer ${refreshToken}` },
-          })
-
-          const { access_token, refresh_token } = response.data
-          setTokens(access_token, refresh_token)
-
-          // Retry original request with new token
-          originalRequest.headers.Authorization = `Bearer ${access_token}`
-          return apiClient(originalRequest)
-        }
-      } catch (refreshError) {
-        // Refresh failed, redirect to login
-        const { logout } = useAdminStore.getState()
-        logout()
-        window.location.href = '/login'
-      }
-    }
-
-    // Handle role mismatch
-    if (error.response?.status === 403) {
-      try {
-        const data: any = error.response?.data
-        if (data?.code === 'ROLE_MISMATCH') {
-          const { logout } = useAdminStore.getState()
-          logout()
-          window.location.href = '/login'
-          return Promise.reject(error)
-        }
-      } catch {}
-    }
-
-    // Log detailed error info for debugging (422 and others)
-    try {
-      const status = error.response?.status
-      const data: any = error.response?.data
-      const url = (error.config as any)?.url
-      console.error('API Error:', { status, url, data })
-    } catch {}
-
-    return Promise.reject(error)
-  }
-)
+const apiClient = api
 
 // API Response Types
 export interface ApiResponse<T = any> {
@@ -121,20 +27,15 @@ export interface PaginatedResponse<T> {
 
 // Auth API
 export const authApi = {
-  adminLogin: async (payload: { username?: string; email?: string; password: string }): Promise<ApiResponse & { access_token: string; refresh_token: string; user: any }> => {
-    // Prefer generic login endpoint (exists), avoids preflight to non-existent admin route
-    try {
-      const res = await apiClient.post('/api/auth/login', payload)
-      return res.data
-    } catch (e: any) {
-      // If generic login is missing, try admin-specific
-      try {
-        const res = await apiClient.post('/api/auth/admin/login', payload)
-        return res.data
-      } catch (e2) {
-        throw e
-      }
+  adminLogin: async (payload: { username?: string; email?: string; password: string }): Promise<ApiResponse & { access_token: string; user: any }> => {
+    const res = await apiClient.post('/api/auth/login', payload)
+    const { access_token, user } = res.data as any
+    if (access_token && user) {
+      setSessionAccessToken(access_token)
+      const { setAuth } = useAdminStore.getState()
+      setAuth(user, access_token, '')
     }
+    return res.data as any
   },
   getProfile: async (): Promise<ApiResponse<any>> =>
     apiClient.get('/api/auth/profile').then(res => res.data),
@@ -153,7 +54,8 @@ export const mediaUrl = (p?: string): string => {
   const normalized = p.replace(/\\/g, '/').replace(/^\/+/, '')
   if (/^https?:\/\//i.test(normalized)) return normalized
   const withUploads = normalized.startsWith('uploads/') ? normalized : `uploads/${normalized}`
-  return `${API_BASE_URL}/${withUploads}`
+  const base = (apiClient.defaults.baseURL as string) || (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000'
+  return `${base}/${withUploads}`
 }
 
 // User Management API
@@ -230,18 +132,6 @@ export const issueApi = {
 
 // Marketplace API
 export const marketplaceApi = {
-  // Get pending marketplace items
-  getPendingItems: (): Promise<ApiResponse<{ items: any[]; count: number }>> =>
-    apiClient.get('/api/admin/marketplace/pending').then(res => res.data),
-
-  // Approve marketplace item
-  approveItem: (itemId: number): Promise<ApiResponse> =>
-    apiClient.post(`/api/admin/marketplace/${itemId}/approve`).then(res => res.data),
-
-  // Reject marketplace item
-  rejectItem: (itemId: number, reason: string): Promise<ApiResponse> =>
-    apiClient.post(`/api/admin/marketplace/${itemId}/reject`, { reason }).then(res => res.data),
-
   // Get marketplace statistics
   getMarketplaceStats: (): Promise<ApiResponse<{
     total_items: number
@@ -406,15 +296,16 @@ export const adminApi = {
   },
   // Marketplace items
   getItems: async (params: Record<string, any> = {}): Promise<{ items: any[]; pagination?: any }> => {
-    // Prefer marketplace pending items endpoint that exists
-    try {
-      const pending = await marketplaceApi.getPendingItems()
-      const data = (pending as any)?.data || pending
-      return { items: data?.items || data || [], pagination: undefined }
-    } catch {
-      const res = await apiClient.get('/api/admin/items', { params })
-      return res.data
-    }
+    // Use public marketplace list with optional filters
+    const page = params.page || 1
+    const per_page = params.per_page || 20
+    const filters: any = { page, per_page }
+    if (params.status) filters.status = params.status
+    if (params.category) filters.category = params.category
+    if (params.transaction_type) filters.transaction_type = params.transaction_type
+    const res = await marketplaceApi.listPublicItems(filters)
+    const data = (res as any)?.items || (res as any)?.data?.items || (res as any)?.data || []
+    return { items: Array.isArray(data) ? data : [], pagination: undefined }
   },
   // Transactions (for reports)
   getTransactions: async (params: Record<string, any> = {}): Promise<{ transactions: any[]; pagination?: any }> => {

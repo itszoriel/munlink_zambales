@@ -6,6 +6,16 @@ from apps.api.models.user import User
 from apps.api.models.token_blacklist import TokenBlacklist
 
 
+def jwt_identity_as_int():
+    """Return the current JWT identity cast to int when possible."""
+    from flask_jwt_extended import get_jwt_identity
+    uid = get_jwt_identity()
+    try:
+        return int(uid) if isinstance(uid, str) else int(uid)
+    except Exception:
+        return uid
+
+
 def get_current_user():
     """Get the current authenticated user."""
     verify_jwt_in_request()

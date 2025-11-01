@@ -62,7 +62,7 @@ export default function MarketplaceItemPage() {
                 <button
                   type="button"
                   aria-label="Prev"
-                  className="absolute left-3 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black text-white rounded-full p-2 z-10"
                   onClick={() => setIdx((i) => (i - 1 + count) % count)}
                 >
                   ‹
@@ -70,19 +70,34 @@ export default function MarketplaceItemPage() {
                 <button
                   type="button"
                   aria-label="Next"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white rounded-full p-2"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black text-white rounded-full p-2 z-10"
                   onClick={() => setIdx((i) => (i + 1) % count)}
                 >
                   ›
                 </button>
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1">
                   {images.map((_, i) => (
-                    <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === safeIdx ? 'bg-white' : 'bg-white/50'}`} />
+                    <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === safeIdx ? 'bg-black' : 'bg-black/40'}`} />
                   ))}
                 </div>
               </>
             )}
           </div>
+          {hasMany && (
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+              {images.map((img, i) => (
+                <button
+                  key={`${img}-${i}`}
+                  type="button"
+                  aria-label={`Image ${i + 1}`}
+                  className={`h-16 w-16 flex-shrink-0 rounded border ${i === safeIdx ? 'ring-2 ring-ocean-600' : ''}`}
+                  onClick={() => setIdx(i)}
+                >
+                  <img src={mediaUrl(img)} alt="thumb" className="w-full h-full object-cover rounded" />
+                </button>
+              ))}
+            </div>
+          )}
           <div>
             <h1 className="text-2xl font-semibold text-neutral-900 mb-2">{item.title}</h1>
             {item.transaction_type && (

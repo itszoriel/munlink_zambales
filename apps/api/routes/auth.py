@@ -68,6 +68,22 @@ except ImportError:
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
 
+@auth_bp.route('/refresh-status', methods=['GET'])
+def refresh_status():
+    """Return whether a refresh cookie is present (avoid 401 on cold start).
+
+    Always returns HTTP 200 with a boolean payload so the frontend can
+    decide whether to call /api/auth/refresh.
+    """
+    try:
+        cookie_name = current_app.config.get('JWT_REFRESH_COOKIE_NAME', 'refresh_token_cookie')
+        has_refresh = bool(request.cookies.get(cookie_name) or request.cookies.get('refresh_token_cookie'))
+        return jsonify({'has_refresh': has_refresh}), 200
+    except Exception:
+        # Be lenient; never error from this probe
+        return jsonify({'has_refresh': False}), 200
+
+
 @auth_bp.route('/register', methods=['POST'])
 def register():
     """Register a new resident account (Gmail-only, email verification required)."""
@@ -174,12 +190,13 @@ def register():
 
         # Generate email verification token
         verification_token = generate_verification_token(user.id, 'email')
-        # Send verification email
+        # Precompute verify link so we can expose it in DEBUG for convenience
+        web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
+        verify_link = f"{web_url}/verify-email?token={verification_token}"
+        # Send verification email (best effort)
         email_sent = False
         try:
             from apps.api.utils.email_sender import send_verification_email
-            web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
-            verify_link = f"{web_url}/verify-email?token={verification_token}"
             send_verification_email(user.email, verify_link)
             email_sent = True
         except Exception:
@@ -192,6 +209,8 @@ def register():
         }
         if current_app.config.get('DEBUG'):
             resp['email_sent'] = email_sent
+            # Provide direct verification link in DEBUG to simplify local testing
+            resp['verify_link'] = verify_link
         return jsonify(resp), 201
     
     except ValidationError as e:
@@ -480,10 +499,10 @@ def resend_verification_email():
 
         verification_token = generate_verification_token(user.id, 'email')
         email_sent = False
+        web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
+        verify_link = f"{web_url}/verify-email?token={verification_token}"
         try:
             from apps.api.utils.email_sender import send_verification_email
-            web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
-            verify_link = f"{web_url}/verify-email?token={verification_token}"
             send_verification_email(user.email, verify_link)
             email_sent = True
         except Exception:
@@ -493,6 +512,7 @@ def resend_verification_email():
         resp = {'message': 'Verification email sent'}
         if current_app.config.get('DEBUG'):
             resp['email_sent'] = email_sent
+            resp['verify_link'] = verify_link
         return jsonify(resp), 200
 
     except Exception as e:
@@ -520,10 +540,10 @@ def resend_verification_email_public():
 
         verification_token = generate_verification_token(user.id, 'email')
         email_sent = False
+        web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
+        verify_link = f"{web_url}/verify-email?token={verification_token}"
         try:
             from apps.api.utils.email_sender import send_verification_email
-            web_url = current_app.config.get('WEB_URL', 'http://localhost:3000')
-            verify_link = f"{web_url}/verify-email?token={verification_token}"
             send_verification_email(user.email, verify_link)
             email_sent = True
         except Exception:
@@ -532,6 +552,7 @@ def resend_verification_email_public():
         resp = {'message': 'If an account exists, a verification email has been sent'}
         if current_app.config.get('DEBUG'):
             resp['email_sent'] = email_sent
+            resp['verify_link'] = verify_link
         return jsonify(resp), 200
     except Exception as e:
         return jsonify({'error': 'Failed to resend verification email', 'details': str(e)}), 400
@@ -783,7 +804,7 @@ def change_password():
         new_password = validate_password(new_password)
         
         # Hash and update password
-        user.password_hash = bcrypt.generate_password_hash(new_password).decode('utf-8')
+        user.password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         user.updated_at = datetime.utcnow()
         db.session.commit()
         

@@ -35,6 +35,7 @@ from apps.api.utils.qr_utils import (
     encrypt_code,
     get_municipality_slug,
 )
+from werkzeug.utils import safe_join
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
@@ -59,17 +60,22 @@ def get_admin_municipality_id():
     try:
         user_id = int(identity)
     except (TypeError, ValueError):
-        print(f"DEBUG: Invalid JWT identity: {identity}")
+        if current_app.config.get('DEBUG'):
+            print(f"DEBUG: Invalid JWT identity: {identity}")
         return None
-    print(f"DEBUG: JWT identity: {user_id}")  # Debug line
+    if current_app.config.get('DEBUG'):
+        print(f"DEBUG: JWT identity: {user_id}")  # Debug line
     user = User.query.get(user_id)
-    print(f"DEBUG: User found: {user.username if user else 'None'}, Role: {user.role if user else 'None'}")  # Debug line
+    if current_app.config.get('DEBUG'):
+        print(f"DEBUG: User found: {user.username if user else 'None'}, Role: {user.role if user else 'None'}")  # Debug line
     
     if not user or user.role not in ['admin', 'municipal_admin']:
-        print(f"DEBUG: User validation failed - user: {user}, role: {user.role if user else 'None'}")  # Debug line
+        if current_app.config.get('DEBUG'):
+            print(f"DEBUG: User validation failed - user: {user}, role: {user.role if user else 'None'}")  # Debug line
         return None
     
-    print(f"DEBUG: Admin municipality ID: {user.admin_municipality_id}")  # Debug line
+    if current_app.config.get('DEBUG'):
+        print(f"DEBUG: Admin municipality ID: {user.admin_municipality_id}")  # Debug line
     return user.admin_municipality_id
 
 def require_admin_municipality():
@@ -78,6 +84,42 @@ def require_admin_municipality():
     if not municipality_id:
         return jsonify({'error': 'Admin access required'}), 403
     return municipality_id
+
+# Protected download for private uploads
+@admin_bp.route('/files', methods=['GET'])
+@jwt_required()
+def admin_download_file():
+    """Serve private files to admins after basic validation.
+
+    Expects query param 'path' relative to UPLOAD_FOLDER.
+    Only allows known private prefixes to prevent exposing public/unrelated files.
+    """
+    try:
+        rel_path = (request.args.get('path') or '').replace('\\', '/').lstrip('/')
+        if not rel_path or '..' in rel_path:
+            return jsonify({'error': 'Invalid path'}), 400
+        allowed_prefixes = (
+            'verification/',
+            'document_requests/',
+            'issues/',
+            'benefits/',
+            'profiles/',
+        )
+        if not any(rel_path.startswith(p) for p in allowed_prefixes):
+            return jsonify({'error': 'Forbidden'}), 403
+
+        upload_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+        directory = str(upload_dir)
+        # safe_join to avoid directory traversal
+        target = safe_join(directory, rel_path)
+        if not target:
+            return jsonify({'error': 'Invalid path'}), 400
+        from flask import send_file
+        return send_file(target)
+    except FileNotFoundError:
+        return jsonify({'error': 'File not found'}), 404
+    except Exception as e:
+        return jsonify({'error': 'Failed to fetch file', 'details': str(e)}), 500
 
 # User Verification Endpoints
 @admin_bp.route('/users/<int:user_id>', methods=['GET'])
@@ -644,115 +686,6 @@ def get_issue_stats():
     except Exception as e:
         return jsonify({'error': 'Failed to get issue statistics', 'details': str(e)}), 500
 
-# Marketplace Moderation Endpoints
-@admin_bp.route('/marketplace/pending', methods=['GET'])
-@jwt_required()
-def get_pending_marketplace_items():
-    """Get pending marketplace items for moderation."""
-    try:
-        municipality_id = require_admin_municipality()
-        if isinstance(municipality_id, tuple):  # Error response
-            return municipality_id
-        
-        try:
-            # Get pending marketplace items for this municipality
-            pending_items = MarketplaceItem.query.filter(
-                and_(
-                    MarketplaceItem.municipality_id == municipality_id,
-                    MarketplaceItem.status == 'pending',
-                    MarketplaceItem.is_active == True
-                )
-            ).order_by(MarketplaceItem.created_at.desc()).all()
-            
-            items_data = []
-            for item in pending_items:
-                item_data = item.to_dict(include_user=True)
-                items_data.append(item_data)
-            
-            return jsonify({
-                'items': items_data,
-                'count': len(items_data)
-            }), 200
-        except Exception as model_error:
-            # If no items or model error, return empty list
-            return jsonify({
-                'items': [],
-                'count': 0,
-                'message': 'No pending marketplace items found'
-            }), 200
-        
-    except Exception as e:
-        return jsonify({'error': 'Failed to get pending marketplace items', 'details': str(e)}), 500
-
-@admin_bp.route('/marketplace/<int:item_id>/approve', methods=['POST'])
-@jwt_required()
-def approve_marketplace_item(item_id):
-    """Approve marketplace item."""
-    try:
-        municipality_id = require_admin_municipality()
-        if isinstance(municipality_id, tuple):  # Error response
-            return municipality_id
-        
-        item = MarketplaceItem.query.get(item_id)
-        if not item:
-            return jsonify({'error': 'Marketplace item not found'}), 404
-        
-        if item.municipality_id != municipality_id:
-            return jsonify({'error': 'Item not in your municipality'}), 403
-        
-        # Approve the item (make it available to residents)
-        item.status = 'available'
-        item.approved_by = get_jwt_identity()
-        item.approved_at = datetime.utcnow()
-        item.updated_at = datetime.utcnow()
-        
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Marketplace item approved successfully',
-            'item': item.to_dict()
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': 'Failed to approve marketplace item', 'details': str(e)}), 500
-
-@admin_bp.route('/marketplace/<int:item_id>/reject', methods=['POST'])
-@jwt_required()
-def reject_marketplace_item(item_id):
-    """Reject marketplace item."""
-    try:
-        municipality_id = require_admin_municipality()
-        if isinstance(municipality_id, tuple):  # Error response
-            return municipality_id
-        
-        data = request.get_json()
-        reason = data.get('reason', 'Item rejected by admin')
-        
-        item = MarketplaceItem.query.get(item_id)
-        if not item:
-            return jsonify({'error': 'Marketplace item not found'}), 404
-        
-        if item.municipality_id != municipality_id:
-            return jsonify({'error': 'Item not in your municipality'}), 403
-        
-        # Reject the item
-        item.status = 'rejected'
-        item.rejection_reason = reason
-        item.rejected_by = get_jwt_identity()
-        item.rejected_at = datetime.utcnow()
-        item.updated_at = datetime.utcnow()
-        
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Marketplace item rejected successfully',
-            'reason': reason
-        }), 200
-        
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': 'Failed to reject marketplace item', 'details': str(e)}), 500
 
 @admin_bp.route('/marketplace/stats', methods=['GET'])
 @jwt_required()

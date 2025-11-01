@@ -18,7 +18,7 @@ export default function AdminLoginPage() {
     setLoading(true)
     try {
       const res = await authApi.adminLogin(formData)
-      const { user, access_token, refresh_token } = res
+      const { user, access_token } = res as any
       
       // Verify user has admin role
       if (user.role !== 'municipal_admin' && user.role !== 'admin') {
@@ -28,7 +28,7 @@ export default function AdminLoginPage() {
       }
       
       // Store auth state
-      setAuth(user, access_token, refresh_token)
+      setAuth(user, access_token, '')
       
       // Redirect to dashboard
       navigate('/dashboard')

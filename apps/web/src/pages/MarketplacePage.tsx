@@ -75,6 +75,7 @@ export default function MarketplacePage() {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<any>({ title: '', description: '', category: '', condition: 'good', transaction_type: 'sell', price: '' })
   const [files, setFiles] = useState<File[]>([])
+  const [error, setError] = useState<string>('')
 
   return (
     <div className="container-responsive py-12">
@@ -228,13 +229,19 @@ export default function MarketplacePage() {
 
       {open && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false) }}>
-          <div className="bg-white rounded-lg w-full max-w-2xl p-6" tabIndex={-1} autoFocus>
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-lg w-full max-w-2xl flex flex-col max-h-[90vh]" tabIndex={-1} autoFocus>
+            <div className="flex items-center justify-between px-6 py-4 border-b">
               <h2 className="text-xl font-semibold">Post an Item</h2>
               <button onClick={() => setOpen(false)} className="text-neutral-500 hover:text-neutral-700" aria-label="Close">
                 <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
+            <div className="px-6 py-4 overflow-y-auto">
+            {error && (
+              <div className="mb-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded px-3 py-2" role="alert">
+                {error}
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1">Title</label>
@@ -289,11 +296,13 @@ export default function MarketplacePage() {
                 )}
               </div>
             </div>
-            <div className="mt-4 flex items-center justify-end gap-2">
+            </div>
+            <div className="px-6 py-4 flex items-center justify-end gap-2 border-t">
               <button className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
               <button className="btn btn-primary" disabled={creating || !form.title || !form.category || !form.description}
                 onClick={async () => {
                   setCreating(true)
+                  setError('')
                   try {
                     const payload: any = {
                       title: form.title,
@@ -306,16 +315,23 @@ export default function MarketplacePage() {
                     const res = await marketplaceApi.createItem(payload)
                     const id = res.data?.item?.id
                     if (id && files.length) {
-                      for (const f of files) {
-                        await marketplaceApi.uploadItemImage(id, f)
+                      const res2 = await marketplaceApi.uploadItemImages(id, files)
+                      const up = (res2 as any)?.data?.uploaded?.length || 0
+                      const skipped = (((res2 as any)?.data?.errors || []) as any[]).length + Number(((res2 as any)?.data?.skipped_over_limit || 0))
+                      if (skipped) {
+                        showToast(`Uploaded ${up} image(s), ${skipped} skipped`, 'info')
                       }
                     }
                     setOpen(false)
-                    showToast('Submitted for admin review. Your listing will appear once approved.', 'success')
+                    showToast('Your listing is live! It\'s now visible in the marketplace.', 'success')
                     const fresh = await marketplaceApi.getItems(params)
                     setItems(fresh.data?.items || [])
                     setFiles([])
                     setForm({ title: '', description: '', category: '', condition: 'good', transaction_type: 'sell', price: '' })
+                  } catch (e: any) {
+                    const msg = e?.response?.data?.error || 'Failed to create item'
+                    setError(msg)
+                    showToast(msg, 'error')
                   } finally {
                     setCreating(false)
                   }

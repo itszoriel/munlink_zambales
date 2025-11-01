@@ -220,16 +220,16 @@ def save_document_request_file(file, request_id, municipality_slug):
 
 
 def delete_file(file_path):
-    """Delete a file if it exists."""
-    full_path = os.path.join(UPLOAD_BASE_DIR, file_path)
-    
+    """Delete a file if it exists using the configured UPLOAD_FOLDER."""
+    from flask import current_app
+    base_dir = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    full_path = os.path.join(str(base_dir), file_path)
     if os.path.exists(full_path):
         try:
             os.remove(full_path)
             return True
         except OSError:
             return False
-    
     return False
 
 

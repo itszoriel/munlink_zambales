@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { dashboardApi } from '../lib/api'
 import UserVerificationList from '../components/UserVerificationList'
 import IssueManagement from '../components/IssueManagement'
-import MarketplaceModeration from '../components/MarketplaceModeration'
 import AnnouncementManager from '../components/AnnouncementManager'
 import AdminHeader from '../components/AdminHeader'
 import { StatCard, Card } from '@munlink/ui'
@@ -109,10 +108,7 @@ export default function AdminDashboardPage() {
             <AnnouncementManager onAnnouncementUpdated={handleAnnouncementUpdated} />
           </Card>
 
-          {/* Marketplace Moderation */}
-          <Card title={<span className="text-xl">Marketplace Moderation</span>} subtitle="Review and moderate marketplace listings">
-            <MarketplaceModeration onItemProcessed={handleItemProcessed} />
-          </Card>
+          {/* Marketplace section removed as listings go live immediately. Consider replacing with a read-only Recent Listings widget. */}
 
           {/* Issue Tracking */}
           <Card title={<span className="text-xl">Reported Issues</span>} subtitle="Track and respond to community issues">

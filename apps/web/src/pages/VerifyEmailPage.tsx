@@ -83,6 +83,11 @@ export default function VerifyEmailPage() {
                       }
                       setResendStatus('sent')
                       setResendMessage(res.data?.message || 'Verification email sent')
+                      const link = (res?.data as any)?.verify_link
+                      if (link) {
+                        // In DEBUG builds, the backend returns a direct link for local testing
+                        window.location.href = link
+                      }
                     } catch (err: any) {
                       const msg = err?.response?.data?.error || err?.message || 'Failed to resend verification email'
                       setResendStatus('error')

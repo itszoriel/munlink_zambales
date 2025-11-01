@@ -457,9 +457,20 @@ export default function MyMarketplacePage() {
                     // Persist image removals
                     payload.images = editForm.images
                     await marketplaceApi.updateItem(editItem.id, payload)
-                    // Upload new files (parallel)
+                    // Upload new files (respect remaining slots)
                     if (uploadFiles.length) {
-                      await Promise.all(uploadFiles.map((f) => marketplaceApi.uploadItemImage(editItem.id, f)))
+                      const remaining = Math.max(0, 5 - (Array.isArray(editForm.images) ? editForm.images.length : 0))
+                      const toUpload = uploadFiles.slice(0, remaining)
+                      if (toUpload.length) {
+                        const res2 = await marketplaceApi.uploadItemImages(editItem.id, toUpload)
+                        const up = (res2 as any)?.data?.uploaded?.length || 0
+                        const skipped = (((res2 as any)?.data?.errors || []) as any[]).length + Number(((res2 as any)?.data?.skipped_over_limit || 0))
+                        if (skipped) {
+                          showToast(`Uploaded ${up} image(s), ${skipped} skipped`, 'info')
+                        }
+                      } else {
+                        showToast('Maximum images reached (5)', 'error')
+                      }
                     }
                     await reloadItems()
                     showToast('Item updated', 'success')

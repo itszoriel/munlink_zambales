@@ -17,6 +17,7 @@
     "vite": "^7.1.7"
   },
   "dependencies": {
+    "@munlink/api-client": "file:../../packages/api-client",
     "@munlink/ui": "file:../../packages/ui",
     "axios": "^1.12.2",
     "lucide-react": "^0.545.0",

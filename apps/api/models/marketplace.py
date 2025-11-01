@@ -40,7 +40,7 @@ class Item(db.Model):
     images = db.Column(db.JSON, nullable=True)
     
     # Status
-    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected, available, reserved, completed, cancelled
+    status = db.Column(db.String(20), default='available')  # pending, approved, rejected, available, reserved, completed, cancelled
     is_active = db.Column(db.Boolean, default=True)
     
     # Admin moderation fields

@@ -1,9 +1,9 @@
 /**
- * MunLink Zambales - Marketplace Moderation Component
- * Component for moderating marketplace listings
+ * MunLink Zambales - Marketplace Overview Component
+ * Read-only overview of marketplace listings with filters and details
  */
 import { useState, useEffect } from 'react'
-import { marketplaceApi, handleApiError } from '../lib/api'
+import { marketplaceApi, handleApiError, mediaUrl } from '../lib/api'
 
 interface MarketplaceItem {
   id: number
@@ -23,25 +23,28 @@ interface MarketplaceItem {
   municipality_name?: string
 }
 
-interface MarketplaceModerationProps {
-  onItemProcessed?: (itemId: number) => void
-}
+interface MarketplaceModerationProps {}
 
-export default function MarketplaceModeration({ onItemProcessed }: MarketplaceModerationProps) {
+export default function MarketplaceModeration({}: MarketplaceModerationProps) {
   const [items, setItems] = useState<MarketplaceItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedItem, setSelectedItem] = useState<MarketplaceItem | null>(null)
   const [showModal, setShowModal] = useState(false)
-  const [actionLoading, setActionLoading] = useState<number | null>(null)
+  const [transactionType, setTransactionType] = useState<'all'|'sell'|'lend'|'donate'>('all')
+  const [status, setStatus] = useState<'all'|'available'|'reserved'|'completed'|'disputed'>('all')
 
-  // Load pending items
-  const loadPendingItems = async () => {
+  // Load items with simple filters
+  const loadItems = async () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await marketplaceApi.getPendingItems()
-      setItems((response as any).items || [])
+      const params: any = {}
+      if (transactionType !== 'all') params.transaction_type = transactionType
+      if (status !== 'all') params.status = status
+      const response = await marketplaceApi.listPublicItems({ page: 1, per_page: 50, ...params })
+      const data = (response as any)?.items || (response as any)?.data?.items || (response as any)?.data || []
+      setItems(Array.isArray(data) ? data : [])
     } catch (err: any) {
       // Handle 422 errors gracefully - show empty state instead of error
       if (err.response?.status === 422) {
@@ -56,50 +59,8 @@ export default function MarketplaceModeration({ onItemProcessed }: MarketplaceMo
   }
 
   useEffect(() => {
-    loadPendingItems()
-  }, [])
-
-  // Handle item approval
-  const handleApproveItem = async (itemId: number) => {
-    try {
-      setActionLoading(itemId)
-      await marketplaceApi.approveItem(itemId)
-      
-      // Remove item from list
-      setItems(prev => prev.filter(item => item.id !== itemId))
-      onItemProcessed?.(itemId)
-      
-      // Close modal if this was the selected item
-      if (selectedItem?.id === itemId) {
-        setShowModal(false)
-        setSelectedItem(null)
-      }
-    } catch (err: any) {
-      setError(handleApiError(err))
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  // Handle item rejection
-  const handleRejectItem = async (itemId: number, reason: string) => {
-    try {
-      setActionLoading(itemId)
-      await marketplaceApi.rejectItem(itemId, reason)
-      
-      // Remove item from list
-      setItems(prev => prev.filter(item => item.id !== itemId))
-      onItemProcessed?.(itemId)
-      
-      // Close modal
-      setShowModal(false)
-      setSelectedItem(null)
-    } catch (err: any) {
-      setError(handleApiError(err))
-    } finally {
-      setActionLoading(null)
-    }
-  }
+    loadItems()
+  }, [transactionType, status])
 
   // Open item detail modal
   const openItemModal = (item: MarketplaceItem) => {
@@ -142,14 +103,35 @@ export default function MarketplaceModeration({ onItemProcessed }: MarketplaceMo
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
           </svg>
         </div>
-        <h3 className="text-lg font-medium text-gray-900 mb-2">No pending items</h3>
-        <p className="text-gray-500">All marketplace items have been processed.</p>
+        <h3 className="text-lg font-medium text-gray-900 mb-2">No items found</h3>
+        <p className="text-gray-500">Try changing filters.</p>
       </div>
     )
   }
 
   return (
     <>
+      {/* Filters */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">Type</label>
+          <select value={transactionType} onChange={(e) => setTransactionType(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
+            <option value="all">All</option>
+            <option value="sell">For Sale</option>
+            <option value="lend">For Lending</option>
+            <option value="donate">Free</option>
+          </select>
+          <label className="text-sm text-gray-600 ml-4">Status</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value as any)} className="border rounded px-2 py-1 text-sm">
+            <option value="all">All</option>
+            <option value="available">Available</option>
+            <option value="reserved">Reserved</option>
+            <option value="completed">Completed</option>
+            <option value="disputed">Disputed</option>
+          </select>
+        </div>
+      </div>
+
       <div className="space-y-4">
         {items.map((item) => (
           <div key={item.id} className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow">
@@ -159,7 +141,7 @@ export default function MarketplaceModeration({ onItemProcessed }: MarketplaceMo
                 <div className="flex-shrink-0">
                   {item.images && item.images.length > 0 ? (
                     <img
-                      src={item.images[0]}
+                      src={mediaUrl(item.images[0])}
                       alt={item.title}
                       className="w-16 h-16 rounded-lg object-cover"
                     />
@@ -178,7 +160,7 @@ export default function MarketplaceModeration({ onItemProcessed }: MarketplaceMo
                   <p className="text-sm text-gray-600 mb-2 line-clamp-2">{item.description}</p>
                   
                   <div className="flex items-center space-x-4 text-sm text-gray-500">
-                    <span className="font-medium text-green-600">₱{item.price.toLocaleString()}</span>
+                    <span className="font-medium text-green-600">{(item as any).price != null ? `₱${Number((item as any).price).toLocaleString()}` : (['donate','lend'].includes((item as any).transaction_type) ? ((item as any).transaction_type === 'donate' ? 'Free' : 'Lend') : 'N/A')}</span>
                     <span>•</span>
                     <span className="capitalize">{item.category}</span>
                     <span>•</span>
@@ -203,21 +185,7 @@ export default function MarketplaceModeration({ onItemProcessed }: MarketplaceMo
                   onClick={() => openItemModal(item)}
                   className="px-3 py-1 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
                 >
-                  Review
-                </button>
-                <button
-                  onClick={() => handleApproveItem(item.id)}
-                  disabled={actionLoading === item.id}
-                  className="px-3 py-1 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
-                >
-                  {actionLoading === item.id ? 'Approving...' : 'Approve'}
-                </button>
-                <button
-                  onClick={() => handleRejectItem(item.id, 'Item rejected by admin')}
-                  disabled={actionLoading === item.id}
-                  className="px-3 py-1 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
-                >
-                  {actionLoading === item.id ? 'Rejecting...' : 'Reject'}
+                  View Details
                 </button>
               </div>
             </div>
@@ -233,9 +201,6 @@ export default function MarketplaceModeration({ onItemProcessed }: MarketplaceMo
             setShowModal(false)
             setSelectedItem(null)
           }}
-          onApprove={handleApproveItem}
-          onReject={handleRejectItem}
-          loading={actionLoading === selectedItem.id}
         />
       )}
     </>
@@ -246,20 +211,10 @@ export default function MarketplaceModeration({ onItemProcessed }: MarketplaceMo
 interface ItemDetailModalProps {
   item: MarketplaceItem
   onClose: () => void
-  onApprove: (itemId: number) => void
-  onReject: (itemId: number, reason: string) => void
-  loading: boolean
 }
 
-function ItemDetailModal({ item, onClose, onApprove, onReject, loading }: ItemDetailModalProps) {
-  const [rejectReason, setRejectReason] = useState('')
-  const [showRejectForm, setShowRejectForm] = useState(false)
-
-  const handleReject = () => {
-    if (rejectReason.trim()) {
-      onReject(item.id, rejectReason)
-    }
-  }
+function ItemDetailModal({ item, onClose }: ItemDetailModalProps) {
+  const [idx, setIdx] = useState(0)
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -267,9 +222,7 @@ function ItemDetailModal({ item, onClose, onApprove, onReject, loading }: ItemDe
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">
-              Marketplace Item Review
-            </h2>
+            <h2 className="text-xl font-semibold text-gray-900">Marketplace Item Details</h2>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600"
@@ -285,16 +238,42 @@ function ItemDetailModal({ item, onClose, onApprove, onReject, loading }: ItemDe
             <div>
               <h3 className="text-sm font-medium text-gray-900 mb-3">Item Images</h3>
               {item.images && item.images.length > 0 ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {item.images.map((image, index) => (
-                    <img
-                      key={index}
-                      src={image}
-                      alt={`Item image ${index + 1}`}
-                      className="w-full h-32 object-cover rounded border"
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="relative w-full aspect-[4/3] bg-gray-100 rounded-lg overflow-hidden">
+                    {(() => { const imgs = item.images || []; return (
+                      <img src={mediaUrl(imgs[Math.min(Math.max(0, idx), Math.max(0, imgs.length-1))])} alt="preview" className="w-full h-full object-cover" />
+                    )})()}
+                    {(item.images || []).length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          aria-label="Prev"
+                          className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black text-white rounded-full p-2 z-10"
+                          onClick={() => setIdx((i) => { const n=(item.images||[]).length; return n? (i - 1 + n) % n : 0 })}
+                        >
+                          ‹
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Next"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black text-white rounded-full p-2 z-10"
+                          onClick={() => setIdx((i) => { const n=(item.images||[]).length; return n? (i + 1) % n : 0 })}
+                        >
+                          ›
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {(item.images || []).length > 1 && (
+                    <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                      {(item.images || []).map((img, i) => (
+                        <button key={`${img}-${i}`} type="button" className={`h-16 w-16 flex-shrink-0 rounded border ${i===idx?'ring-2 ring-blue-600':''}`} onClick={() => setIdx(i)}>
+                          <img src={mediaUrl(img)} alt={`thumb ${i+1}`} className="w-full h-full object-cover rounded" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="w-full h-32 bg-gray-100 rounded border flex items-center justify-center">
                   <span className="text-gray-500">No images</span>
@@ -321,8 +300,8 @@ function ItemDetailModal({ item, onClose, onApprove, onReject, loading }: ItemDe
                 </div>
                 <div>
                   <h4 className="text-sm font-medium text-gray-900 mb-1">Status</h4>
-                  <span className="inline-flex px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-full">
-                    Pending Review
+                  <span className="inline-flex px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800 rounded-full capitalize">
+                    {item.status || 'n/a'}
                   </span>
                 </div>
               </div>
@@ -356,48 +335,7 @@ function ItemDetailModal({ item, onClose, onApprove, onReject, loading }: ItemDe
 
           {/* Actions */}
           <div className="flex items-center justify-end space-x-3 mt-6 pt-6 border-t">
-            {!showRejectForm ? (
-              <>
-                <button
-                  onClick={() => setShowRejectForm(true)}
-                  className="px-4 py-2 text-sm font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-md transition-colors"
-                >
-                  Reject
-                </button>
-                <button
-                  onClick={() => onApprove(item.id)}
-                  disabled={loading}
-                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
-                >
-                  {loading ? 'Approving...' : 'Approve Item'}
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="flex-1">
-                  <textarea
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    placeholder="Reason for rejection..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
-                    rows={2}
-                  />
-                </div>
-                <button
-                  onClick={() => setShowRejectForm(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleReject}
-                  disabled={loading || !rejectReason.trim()}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
-                >
-                  {loading ? 'Rejecting...' : 'Confirm Reject'}
-                </button>
-              </>
-            )}
+            <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors">Close</button>
           </div>
         </div>
       </div>

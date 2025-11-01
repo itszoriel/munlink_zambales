@@ -41,8 +41,8 @@ class Config:
     JWT_COOKIE_DOMAIN = os.getenv('COOKIE_DOMAIN')  # e.g., .munlink.example.com
     JWT_ACCESS_COOKIE_PATH = '/'
     JWT_REFRESH_COOKIE_PATH = '/'
-    # CSRF can be enabled later if we migrate access to cookies
-    JWT_COOKIE_CSRF_PROTECT = (os.getenv('JWT_COOKIE_CSRF_PROTECT', 'False') == 'True')
+    # Enable CSRF protection for refresh-cookie flow
+    JWT_COOKIE_CSRF_PROTECT = (os.getenv('JWT_COOKIE_CSRF_PROTECT', 'True') == 'True')
     
     # Admin Security
     ADMIN_SECRET_KEY = os.getenv('ADMIN_SECRET_KEY', 'admin-secret-key')
@@ -102,6 +102,9 @@ class Config:
         
         # Create marketplace upload directory
         (upload_dir / 'marketplace' / 'items').mkdir(parents=True, exist_ok=True)
+        # Create category-based directories used by file_handler
+        for category in ['profiles', 'verification', 'marketplace', 'issues', 'benefits', 'document_requests', 'announcements']:
+            (upload_dir / category).mkdir(parents=True, exist_ok=True)
 
 
 class DevelopmentConfig(Config):

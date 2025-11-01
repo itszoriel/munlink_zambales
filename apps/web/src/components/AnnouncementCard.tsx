@@ -21,7 +21,6 @@ type Props = {
 
 export default function AnnouncementCard({ id, title, content, municipality, priority, createdAt, images, pinned, href, onClick }: Props) {
   const [read, setRead] = useState<boolean>(isRead(id))
-  const [idx] = useState(0)
 
   useEffect(() => {
     setRead(isRead(id))

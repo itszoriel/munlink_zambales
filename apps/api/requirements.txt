@@ -10,6 +10,8 @@ Flask-CORS==4.0.0
 SQLAlchemy==2.0.34
 # Use SQLite locally; omit psycopg2-binary
 # psycopg2-binary==2.9.7
+# Postgres (psycopg3) for production
+psycopg[binary]==3.2.3
 # Align Alembic with latest compatible
 alembic==1.17.0
 

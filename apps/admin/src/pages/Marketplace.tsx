@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { adminApi, handleApiError, marketplaceApi, mediaUrl, showToast, transactionsAdminApi, userApi } from '../lib/api'
 import { useAdminStore } from '../lib/store'
-import { ShoppingBag, Hourglass, CheckCircle, XCircle, Store, BadgeDollarSign, Handshake, Gift, Check, X } from 'lucide-react'
+import { ShoppingBag, Store, BadgeDollarSign, Handshake, Gift, Check, X } from 'lucide-react'
 
 export default function Marketplace() {
   const [tab, setTab] = useState<'items' | 'transactions'>('items')
@@ -15,7 +15,7 @@ export default function Marketplace() {
   const adminMunicipalityId = useAdminStore((s)=> s.user?.admin_municipality_id)
   const [reviewItem, setReviewItem] = useState<any | null>(null)
   const [decisionLoading, setDecisionLoading] = useState<boolean>(false)
-  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'pending' | 'rejected'>('pending')
+  // Status moderation removed; show available items by default
 
   useEffect(() => {
     let mounted = true
@@ -26,17 +26,13 @@ export default function Marketplace() {
         const promises: any[] = []
         // Stats always
         promises.push(marketplaceApi.getMarketplaceStats())
-        // Items based on status filter
-        if (statusFilter === 'pending') {
-          promises.push(adminApi.getItems({ page: 1, per_page: 24 }))
-        } else {
-          promises.push(marketplaceApi.listPublicItems({
-            municipality_id: adminMunicipalityId,
-            status: statusFilter === 'all' ? undefined : statusFilter,
-            page: 1,
-            per_page: 24,
-          }))
-        }
+        // Load public available items for this municipality
+        promises.push(marketplaceApi.listPublicItems({
+          municipality_id: adminMunicipalityId,
+          status: 'available',
+          page: 1,
+          per_page: 24,
+        }))
 
         const [statsRes, itemsRes] = await Promise.allSettled(promises)
 
@@ -79,7 +75,7 @@ export default function Marketplace() {
       }
     })()
     return () => { mounted = false }
-  }, [statusFilter, adminMunicipalityId])
+  }, [adminMunicipalityId])
 
   const filtered = useMemo(() => rows.filter((i) => filter === 'all' || i.type === filter), [rows, filter])
 
@@ -130,16 +126,10 @@ export default function Marketplace() {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mb-8">
         {[
           { icon: 'total', label: 'Total Items', value: String(stats?.total_items ?? '—'), color: 'ocean' },
-          { icon: 'pending', label: 'Pending Review', value: String(stats?.pending_items ?? '—'), color: 'sunset' },
-          { icon: 'approved', label: 'Approved', value: String(stats?.approved_items ?? '—'), color: 'forest' },
-          { icon: 'rejected', label: 'Rejected', value: String(stats?.rejected_items ?? '—'), color: 'purple' },
         ].map((stat, i) => (
           <div key={i} className="bg-white/70 backdrop-blur-xl rounded-2xl p-6 border border-white/50 shadow-lg hover:scale-105 transition-transform">
             <div className={`inline-flex w-12 h-12 bg-${stat.color}-100 rounded-xl items-center justify-center mb-3`}>
               {stat.icon === 'total' && <ShoppingBag className="w-6 h-6" aria-hidden="true" />}
-              {stat.icon === 'pending' && <Hourglass className="w-6 h-6" aria-hidden="true" />}
-              {stat.icon === 'approved' && <CheckCircle className="w-6 h-6" aria-hidden="true" />}
-              {stat.icon === 'rejected' && <XCircle className="w-6 h-6" aria-hidden="true" />}
             </div>
             <p className="text-3xl font-bold text-neutral-900 mb-1">{stat.value}</p>
             <p className="text-sm text-neutral-600 mb-2">{stat.label}</p>
@@ -169,19 +159,7 @@ export default function Marketplace() {
               </button>
             ))}
           </div>
-          <select
-            name="statusFilter"
-            id="marketplace-status-filter"
-            aria-label="Filter by status"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="ml-auto px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm font-medium"
-          >
-            <option value="all">All Status</option>
-            <option value="available">Approved</option>
-            <option value="pending">Pending Review</option>
-            <option value="rejected">Rejected</option>
-          </select>
+          {/* Status filter removed (moderation disabled) */}
           {userRole === 'admin' ? (
             <select name="municipalityFilter" id="marketplace-municipality-filter" aria-label="Filter by municipality" className="px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm font-medium"><option>All Municipalities</option></select>
           ) : (
@@ -246,7 +224,7 @@ export default function Marketplace() {
                 <div><p className="text-xs text-neutral-600">Posted</p><p className="text-xs font-medium text-neutral-700">{item.posted}</p></div>
               </div>
               <div className="flex">
-                <button onClick={() => setReviewItem(item)} className="flex-1 py-2 bg-ocean-100 hover:bg-ocean-200 text-ocean-700 rounded-lg text-xs font-medium transition-colors">{item.status === 'pending' ? 'Review' : 'View'}</button>
+                <button onClick={() => setReviewItem(item)} className="flex-1 py-2 bg-ocean-100 hover:bg-ocean-200 text-ocean-700 rounded-lg text-xs font-medium transition-colors">View</button>
               </div>
             </div>
           </div>
@@ -335,8 +313,9 @@ export default function Marketplace() {
           <div className="relative bg-white rounded-2xl w-full max-w-full sm:max-w-2xl xl:max-w-3xl p-4 sm:p-6 pb-24 sm:pb-6 shadow-2xl max-h-[90vh] overflow-y-auto" tabIndex={-1} autoFocus>
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h2 className="text-xl font-semibold">Review Listing</h2>
-                <p className="text-xs text-neutral-600">Ensure this item complies with community guidelines.</p>
+                <h2 className="text-xl font-semibold">Listing Details</h2>
+                <p className="text-xs text-neutral-600">Read-only view of the listing.
+                </p>
               </div>
               <button onClick={() => setReviewItem(null)} className="text-neutral-500 hover:text-neutral-700" aria-label="Close">
                 <X className="w-5 h-5" aria-hidden="true" />
@@ -371,40 +350,7 @@ export default function Marketplace() {
               </div>
             </div>
             <div className="mt-6 flex items-center justify-end gap-2">
-              {reviewItem.status === 'pending' ? (
-                <>
-                  <button disabled={decisionLoading} onClick={async () => {
-                    setDecisionLoading(true)
-                    try {
-                      await marketplaceApi.rejectItem(reviewItem.id, 'Does not comply')
-                      setRows((prev) => prev.filter((r) => r.id !== reviewItem.id))
-                      showToast('Item rejected', 'success')
-                      await refreshStats()
-                      setReviewItem(null)
-                    } catch (e: any) {
-                      showToast(handleApiError(e as any), 'error')
-                    } finally {
-                      setDecisionLoading(false)
-                    }
-                  }} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm">Reject</button>
-                  <button disabled={decisionLoading} onClick={async () => {
-                    setDecisionLoading(true)
-                    try {
-                      await marketplaceApi.approveItem(reviewItem.id)
-                      setRows((prev) => prev.filter((r) => r.id !== reviewItem.id))
-                      showToast('Item approved and published', 'success')
-                      await refreshStats()
-                      setReviewItem(null)
-                    } catch (e: any) {
-                      showToast(handleApiError(e as any), 'error')
-                    } finally {
-                      setDecisionLoading(false)
-                    }
-                  }} className="px-4 py-2 bg-forest-600 hover:bg-forest-700 text-white rounded-lg text-sm">Approve</button>
-                </>
-              ) : (
-                <button onClick={() => setReviewItem(null)} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-sm">Close</button>
-              )}
+              <button onClick={() => setReviewItem(null)} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-sm">Close</button>
             </div>
           </div>
         </div>

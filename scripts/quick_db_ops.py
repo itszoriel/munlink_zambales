@@ -193,6 +193,21 @@ def full_cleanup():
     
     print("Full cleanup completed!")
 
+def promote_pending_items():
+    """Promote existing active pending marketplace items to available."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM items WHERE status='pending' AND is_active=1")
+        count = cursor.fetchone()[0]
+        cursor.execute("UPDATE items SET status='available' WHERE status='pending' AND is_active=1")
+        conn.commit()
+        print(f"Promoted {count} pending item(s) to available.")
+    except Exception as e:
+        print(f"Error promoting items: {e}")
+    finally:
+        conn.close()
+
 def main():
     """Main function."""
     if len(sys.argv) < 2:
@@ -230,6 +245,8 @@ def main():
         preserve_municipalities()
     elif command == 'full-cleanup':
         full_cleanup()
+    elif command == 'promote-pending-items':
+        promote_pending_items()
     else:
         print(f"Unknown command: {command}")
 

@@ -112,21 +112,9 @@ ZAMBALES_MUNICIPALITIES = [
     }
 ]
 
-# Document types (legally-safe defaults aligned to project scope)
-# Digital PDFs are enabled only for zero-fee barangay certifications.
+# Document types (province-wide defaults). Only zero-fee barangay docs are digital by default.
 DOCUMENT_TYPES = [
-    # Barangay - Digital, Free
-    {
-        'name': 'Barangay Clearance',
-        'code': 'BRGY_CLEARANCE',
-        'description': 'Certificate of good standing from the barangay',
-        'authority_level': 'barangay',
-        'requirements': ['Valid ID', 'Purpose of request'],
-        'fee': 0.00,
-        'processing_days': 1,
-        'supports_physical': True,
-        'supports_digital': True,
-    },
+    # Barangay - Digital (Free)
     {
         'name': 'Certificate of Residency',
         'code': 'BRGY_RESIDENCY',
@@ -149,16 +137,29 @@ DOCUMENT_TYPES = [
         'supports_physical': True,
         'supports_digital': True,
     },
+
+    # Barangay - In-person only (fees vary by LGU)
+    {
+        'name': 'Barangay Clearance',
+        'code': 'BRGY_CLEARANCE',
+        'description': 'Certificate of good standing from the barangay',
+        'authority_level': 'barangay',
+        'requirements': ['Valid ID', 'Purpose of request'],
+        'fee': 50.00,
+        'processing_days': 1,
+        'supports_physical': True,
+        'supports_digital': False,
+    },
     {
         'name': 'Certificate of Good Moral Character',
         'code': 'BRGY_GOOD_MORAL',
         'description': 'Certification from the barangay on good moral character',
         'authority_level': 'barangay',
         'requirements': ['Valid ID', 'Purpose of request'],
-        'fee': 0.00,
+        'fee': 50.00,
         'processing_days': 2,
         'supports_physical': True,
-        'supports_digital': True,
+        'supports_digital': False,
     },
     {
         'name': 'Certificate of No Barangay Case',
@@ -166,13 +167,11 @@ DOCUMENT_TYPES = [
         'description': 'Certification that there is no pending barangay case',
         'authority_level': 'barangay',
         'requirements': ['Valid ID', 'Purpose of request'],
-        'fee': 0.00,
+        'fee': 50.00,
         'processing_days': 2,
         'supports_physical': True,
-        'supports_digital': True,
+        'supports_digital': False,
     },
-
-    # Barangay - In-person only
     {
         'name': 'Barangay Business Clearance',
         'code': 'BRGY_BUSINESS_CLEARANCE',
@@ -190,7 +189,7 @@ DOCUMENT_TYPES = [
         'description': 'Certification referencing barangay blotter (restricted release)',
         'authority_level': 'barangay',
         'requirements': ['Valid ID'],
-        'fee': 0.00,
+        'fee': 50.00,
         'processing_days': 3,
         'supports_physical': True,
         'supports_digital': False,
@@ -207,7 +206,7 @@ DOCUMENT_TYPES = [
         'supports_digital': False,
     },
 
-    # Municipal - In-person only (application online)
+    # Municipal - In-person only (applications online)
     {
         'name': 'Business Permit (New/Renewal)',
         'code': 'BUSINESS_PERMIT',
@@ -258,7 +257,7 @@ DOCUMENT_TYPES = [
         'description': 'Certificate of Occupancy (application only)',
         'authority_level': 'municipal',
         'requirements': ['As-built plans', 'Final inspection reports'],
-        'fee': 0.00,
+        'fee': 200.00,
         'processing_days': 7,
         'supports_physical': True,
         'supports_digital': False,
@@ -280,7 +279,7 @@ DOCUMENT_TYPES = [
         'description': 'Certified copy/transcription from Local Civil Registrar',
         'authority_level': 'municipal',
         'requirements': ['Valid ID'],
-        'fee': 0.00,
+        'fee': 150.00,
         'processing_days': 3,
         'supports_physical': True,
         'supports_digital': False,
@@ -291,7 +290,7 @@ DOCUMENT_TYPES = [
         'description': 'Certified copy/transcription from Local Civil Registrar',
         'authority_level': 'municipal',
         'requirements': ['Valid ID'],
-        'fee': 0.00,
+        'fee': 150.00,
         'processing_days': 3,
         'supports_physical': True,
         'supports_digital': False,
@@ -302,7 +301,7 @@ DOCUMENT_TYPES = [
         'description': 'Certified copy/transcription from Local Civil Registrar',
         'authority_level': 'municipal',
         'requirements': ['Valid ID'],
-        'fee': 0.00,
+        'fee': 150.00,
         'processing_days': 3,
         'supports_physical': True,
         'supports_digital': False,
@@ -313,7 +312,7 @@ DOCUMENT_TYPES = [
         'description': 'Application for marriage license',
         'authority_level': 'municipal',
         'requirements': ['Birth certificates', 'CENOMAR (PSA)', 'Barangay certificate'],
-        'fee': 0.00,
+        'fee': 300.00,
         'processing_days': 10,
         'supports_physical': True,
         'supports_digital': False,
@@ -324,7 +323,7 @@ DOCUMENT_TYPES = [
         'description': 'Certified true copy of tax declaration (Assessor)',
         'authority_level': 'municipal',
         'requirements': ['Valid ID', 'Property details'],
-        'fee': 0.00,
+        'fee': 150.00,
         'processing_days': 3,
         'supports_physical': True,
         'supports_digital': False,
@@ -335,7 +334,7 @@ DOCUMENT_TYPES = [
         'description': 'Clearance from Treasurer for real property taxes',
         'authority_level': 'municipal',
         'requirements': ['Valid ID', 'Property details'],
-        'fee': 0.00,
+        'fee': 100.00,
         'processing_days': 2,
         'supports_physical': True,
         'supports_digital': False,

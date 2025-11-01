@@ -6,7 +6,7 @@ import sqlite3
 from sqlalchemy.exc import OperationalError as SAOperationalError, ProgrammingError as SAProgrammingError
 from apps.api import db
 from apps.api.models.user import User
-from apps.api.models.marketplace import Item, Transaction, Message
+from apps.api.models.marketplace import Item, Transaction
 from apps.api.models.municipality import Municipality
 from apps.api.utils import (
     verified_resident_required,
@@ -163,7 +163,7 @@ def create_item():
             barangay_id=user.barangay_id,
             pickup_location=data.get('pickup_location'),
             images=[],
-            status='pending'
+            status='available'
         )
         
         db.session.add(item)
@@ -216,8 +216,7 @@ def update_item(item_id):
         if 'price' in data and item.transaction_type == 'sell':
             item.price = validate_price(data['price'], item.transaction_type)
         
-        if 'status' in data:
-            item.status = data['status']
+        # Status is controlled by transaction lifecycle; disallow direct edits
         
         if 'pickup_location' in data:
             item.pickup_location = data['pickup_location']
@@ -342,6 +341,67 @@ def upload_item_image(item_id):
         return jsonify({'error': 'Failed to upload image', 'details': str(e)}), 500
 
 
+@marketplace_bp.route('/items/<int:item_id>/uploads', methods=['POST'])
+@jwt_required()
+@fully_verified_required
+def upload_item_images(item_id):
+    """Upload multiple images for a marketplace item (owner only, max 5 total)."""
+    try:
+        user_id = get_jwt_identity()
+        # Normalize identity to integer when possible (tokens may carry string ids)
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else int(user_id)
+        except Exception:
+            uid = user_id
+
+        item = Item.query.get(item_id)
+        if not item:
+            return jsonify({'error': 'Item not found'}), 404
+        if item.user_id != uid:
+            return jsonify({'error': 'Forbidden'}), 403
+
+        files = request.files.getlist('files')
+        if not files:
+            return jsonify({'error': 'No files uploaded'}), 400
+
+        images = item.images or []
+        if len(images) >= 5:
+            return jsonify({'error': 'Maximum images reached (5)'}), 400
+
+        municipality = Municipality.query.get(item.municipality_id)
+        municipality_slug = municipality.slug if municipality else 'unknown'
+
+        available_slots = max(0, 5 - len(images))
+        uploaded = []
+        errors = []
+        skipped_over_limit = 0
+
+        for idx, f in enumerate(files):
+            if len(uploaded) >= available_slots:
+                skipped_over_limit += 1
+                continue
+            try:
+                rel_path = save_marketplace_image(f, item_id, municipality_slug)
+                images.append(rel_path)
+                uploaded.append(rel_path)
+            except Exception as e:
+                errors.append({'index': idx, 'error': str(e)})
+
+        item.images = images
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Images processed',
+            'uploaded': uploaded,
+            'errors': errors,
+            'skipped_over_limit': skipped_over_limit,
+            'item': item.to_dict()
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': 'Failed to upload images', 'details': str(e)}), 500
+
+
 @marketplace_bp.route('/transactions', methods=['POST'])
 @jwt_required()
 @fully_verified_required
@@ -371,8 +431,12 @@ def create_transaction():
         if item.status != 'available':
             return jsonify({'error': 'Item is no longer available'}), 400
         
-        # Can't transact with yourself
-        if item.user_id == user_id:
+        # Can't transact with yourself (normalize identity type)
+        try:
+            uid = int(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            uid = user_id
+        if int(item.user_id) == int(uid):
             return jsonify({'error': 'You cannot transact with your own item'}), 400
         
         # Enforce municipality scoping: transactions only within user's registered municipality
@@ -391,7 +455,7 @@ def create_transaction():
         # Create transaction; keep item visible until seller proposes
         transaction = Transaction(
             item_id=item_id,
-            buyer_id=user_id,
+            buyer_id=uid,
             seller_id=item.user_id,
             transaction_type=item.transaction_type,
             amount=item.price if item.transaction_type == 'sell' else None,

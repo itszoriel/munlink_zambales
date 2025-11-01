@@ -50,7 +50,7 @@ def create_app(config_class=Config):
                 "http://localhost:3001"
             ],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization"],
+            "allow_headers": ["Content-Type", "Authorization", "X-CSRF-TOKEN"],
             "supports_credentials": True
         }
     })
@@ -104,16 +104,22 @@ def create_app(config_class=Config):
             'docs': '/api/docs'
         }), 200
     
-    # Serve uploaded files
+    # Serve uploaded files (public categories only)
     @app.route('/uploads/<path:filename>')
     def serve_uploaded_file(filename):
         """Serve uploaded files from the uploads directory"""
         try:
-            # Get the upload directory from config
+            # Public allowlist
+            allowed_prefixes = (
+                'marketplace/',
+                'announcements/',
+            )
+            normalized = filename.replace('\\', '/').lstrip('/')
+            if not any(normalized.startswith(p) for p in allowed_prefixes):
+                return jsonify({'error': 'Forbidden'}), 403
             upload_dir = app.config.get('UPLOAD_FOLDER', 'uploads')
-            # Ensure string path for Flask static serving
             directory = str(upload_dir)
-            return send_from_directory(directory, filename)
+            return send_from_directory(directory, normalized)
         except FileNotFoundError:
             return jsonify({'error': 'File not found'}), 404
     

@@ -78,7 +78,7 @@ export default function Dashboard() {
       const [pendingUsersRes, issuesRes, itemsRes, announcementsRes, marketStatsRes] = await Promise.allSettled([
         userApi.getPendingUsers(),
         issueApi.getIssues({ page: 1, per_page: 20 }),
-        marketplaceApi.getPendingItems(),
+        marketplaceApi.listPublicItems({ page: 1, per_page: 20 }),
         announcementApi.getAnnouncements(),
         marketplaceApi.getMarketplaceStats(),
       ])
