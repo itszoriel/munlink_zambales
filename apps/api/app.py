@@ -14,6 +14,7 @@ load_dotenv(os.path.join(project_root, '.env'))
 sys.path.insert(0, project_root)
 
 from flask import Flask, jsonify, send_from_directory
+import logging
 from flask_cors import CORS
 
 # Import config - try absolute first, then relative
@@ -28,6 +29,9 @@ def create_app(config_class=Config):
     """Application factory pattern"""
     app = Flask(__name__)
     app.config.from_object(config_class)
+    # Basic logging configuration for production
+    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
     # Ensure directories and other config-dependent setup are initialized
     try:
         config_class.init_app(app)

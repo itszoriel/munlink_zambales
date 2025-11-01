@@ -1,0 +1,72 @@
+services:
+  - type: web
+    name: munlink-api
+    env: python
+    region: singapore
+    buildCommand: pip install -r apps/api/requirements.txt
+    startCommand: gunicorn -w 2 -k gthread -b 0.0.0.0:$PORT apps.api.app:app
+    healthCheckPath: /health
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: postgresql+psycopg://munlink_db_user:SUEkbGrVZdl7Oeas6Rdra8RaktbF7vbA@dpg-d430duumcj7s73ahp5g0-a/munlink_db?sslmode=require
+      - key: WEB_URL
+        value: https://munlink-web.onrender.com
+      - key: ADMIN_URL
+        value: https://munlink-admin.onrender.com
+      - key: JWT_COOKIE_SECURE
+        value: "True"
+      - key: JWT_COOKIE_SAMESITE
+        value: None
+      - key: QR_BASE_URL
+        value: https://munlink-web.onrender.com/verify
+      - key: SMTP_SERVER
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: FROM_EMAIL
+        value: munlink.noreply@gmail.com
+      - key: UPLOAD_FOLDER
+        value: /var/uploads
+      - key: DB_POOL_RECYCLE
+        value: "300"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHONPATH
+        value: .
+      - key: FLASK_APP
+        value: apps.api.app:app
+    disk:
+      name: uploads
+      mountPath: /var/uploads
+      sizeGB: 1
+    postDeployCommand: python -m flask db upgrade
+
+  - type: static
+    name: munlink-web
+    env: static
+    buildCommand: |
+      cd apps/web
+      npm ci
+      VITE_API_URL=https://munlink-api.onrender.com npm run build
+    staticPublishPath: apps/web/dist
+
+  - type: static
+    name: munlink-admin
+    env: static
+    buildCommand: |
+      cd apps/admin
+      npm ci
+      VITE_API_URL=https://munlink-api.onrender.com npm run build
+    staticPublishPath: apps/admin/dist

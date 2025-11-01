@@ -26,6 +26,12 @@ class Config:
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = DEBUG
+    # Engine options for connection resilience in hosted environments
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+        # recycle stale connections periodically (seconds)
+        'pool_recycle': int(os.getenv('DB_POOL_RECYCLE', '300')),
+    }
     
     # JWT
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'jwt-secret-key-change-in-production')
@@ -37,7 +43,9 @@ class Config:
     JWT_TOKEN_LOCATION = ['headers', 'cookies']
     # Cookie settings for refresh token (and optionally access later)
     JWT_COOKIE_SECURE = (os.getenv('JWT_COOKIE_SECURE', 'False' if DEBUG else 'True') == 'True')
-    JWT_COOKIE_SAMESITE = os.getenv('JWT_COOKIE_SAMESITE', 'Lax')
+    # Default cookie samesite: 'None' in production (for cross-site cookie on HTTPS), 'Lax' in dev
+    _default_samesite = 'Lax' if DEBUG else 'None'
+    JWT_COOKIE_SAMESITE = os.getenv('JWT_COOKIE_SAMESITE', _default_samesite)
     JWT_COOKIE_DOMAIN = os.getenv('COOKIE_DOMAIN')  # e.g., .munlink.example.com
     JWT_ACCESS_COOKIE_PATH = '/'
     JWT_REFRESH_COOKIE_PATH = '/'
